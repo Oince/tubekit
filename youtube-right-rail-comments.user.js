@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.7
+// @version      0.3.8
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -205,7 +205,7 @@
         width: 100% !important;
         max-width: none !important;
         margin: 0 !important;
-        padding: 0 4px 24px !important;
+        padding: 8px 12px 24px !important;
       }
 
       .${SCRIPT_ID}-status {
