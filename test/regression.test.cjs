@@ -127,7 +127,7 @@ test('replacement comments are adopted and observed', async t => {
   assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), replacement);
   assert.ok(document.querySelector('.ytrrc-status'));
   replacement.append(document.createElement('ytd-comments-header-renderer'));
-  await sleep(100);
+  await sleep(350);
   assert.equal(document.querySelector('.ytrrc-status'), null);
 });
 
@@ -299,4 +299,66 @@ function checkStyles(css) {
 test('dark mode: panel tokens have exact light/dark fallbacks and elements use them', async t => {
   const { document } = await setup(t, { htmlAttrs: 'dark' });
   checkStyles(document.getElementById('ytrrc-styles').textContent);
+});
+
+test('mutations inside adopted comments do not trigger evaluation', async t => {
+  const { w, document } = await setup(t);
+  const count = w.evaluationCount;
+  const comments = document.querySelector('#comments');
+  for (let i = 0; i < 5; i++) {
+    comments.appendChild(document.createElement('ytd-comment-thread-renderer'));
+    await sleep(30);
+  }
+  await sleep(300);
+  assert.equal(w.evaluationCount, count);
+});
+
+test('evaluation is deferred while the pane is scrolling', async t => {
+  const { w, document } = await setup(t);
+  const count = w.evaluationCount;
+  document.querySelector('#ytrrc-comments-pane').dispatchEvent(new w.Event('scroll'));
+  document.querySelector('#below').appendChild(document.createElement('div'));
+  await sleep(100);
+  assert.equal(w.evaluationCount, count);
+  await sleep(200);
+  assert.ok(w.evaluationCount > count);
+});
+
+test('removing comments from the pane is still detected', async t => {
+  const { document } = await setup(t);
+  assert.equal(document.querySelector('.ytrrc-status'), null);
+  document.querySelector('#comments').remove();
+  await sleep(300);
+  assert.ok(document.querySelector('.ytrrc-status'));
+});
+
+test('mutations on nodes removed within the same batch do not trigger evaluation', async t => {
+  const { w, document } = await setup(t);
+  const count = w.evaluationCount;
+  const comments = document.querySelector('#comments');
+  const div = document.createElement('div');
+  comments.appendChild(div);
+  div.appendChild(document.createElement('span'));
+  div.remove();
+  await sleep(300);
+  assert.equal(w.evaluationCount, count);
+});
+
+test('comment mutation bursts are checked at most once per throttle window', async t => {
+  const { w, document } = await setup(t);
+  const comments = document.querySelector('#comments');
+  let calls = 0;
+  const original = comments.querySelector;
+  comments.querySelector = function (...args) {
+    calls++;
+    return original.apply(this, args);
+  };
+  for (let i = 0; i < 10; i++) comments.appendChild(document.createElement('ytd-comment-thread-renderer'));
+  for (let i = 0; i < 3; i++) {
+    await new Promise(resolve => w.requestAnimationFrame(resolve));
+    comments.appendChild(document.createElement('ytd-comment-thread-renderer'));
+  }
+  assert.equal(calls, 0);
+  await sleep(400);
+  assert.ok(calls > 0 && calls <= 4, `querySelector calls: ${calls}`);
 });

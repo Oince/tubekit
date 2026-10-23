@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.9
+// @version      0.3.10
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -22,6 +22,8 @@
   const SCRIPT_ID = 'ytrrc';
   const MIN_VIEWPORT_WIDTH = 1000;
   const COMMENTS_WAIT_MS = 20_000;
+  const SCROLL_IDLE_MS = 150;
+  const COMMENTS_CHECK_MS = 250;
 
   const SELECTORS = {
     watch: 'ytd-watch-flexy',
@@ -53,7 +55,10 @@
     lastTab: null,
     mountTimeout: 0,
     commentsTimeout: 0,
+    commentsCheckTimer: 0,
     evaluationTimer: 0,
+    lastPaneScrollAt: 0,
+    statusShown: false,
     retryTimer: 0,
     specialObserver: null,
     commentsObserver: null,
@@ -204,6 +209,7 @@
         overflow-y: auto;
         overscroll-behavior: contain;
         scrollbar-gutter: stable;
+        contain: content;
       }
 
       .${SCRIPT_ID}-pane[data-active='true'] {
@@ -363,7 +369,9 @@
 
   function setCommentsStatus(kind) {
     if (!state.commentsPane) return;
+    if (!kind && !state.statusShown) return;
     state.commentsPane.querySelectorAll(`:scope > .${SCRIPT_ID}-status`).forEach((node) => node.remove());
+    state.statusShown = Boolean(kind);
     if (kind) state.commentsPane.prepend(statusElement(kind));
   }
 
@@ -415,6 +423,7 @@
     commentsPane.setAttribute('role', 'tabpanel');
     commentsPane.setAttribute('aria-labelledby', `${SCRIPT_ID}-comments-tab`);
     commentsPane.addEventListener('scroll', () => {
+      state.lastPaneScrollAt = performance.now();
       if (state.activeTab === 'comments') state.scrollTop.comments = commentsPane.scrollTop;
     }, { passive: true });
 
@@ -425,6 +434,7 @@
     relatedPane.setAttribute('role', 'tabpanel');
     relatedPane.setAttribute('aria-labelledby', `${SCRIPT_ID}-related-tab`);
     relatedPane.addEventListener('scroll', () => {
+      state.lastPaneScrollAt = performance.now();
       if (state.activeTab === 'related') state.scrollTop.related = relatedPane.scrollTop;
     }, { passive: true });
 
@@ -540,7 +550,15 @@
       }
     };
 
-    state.commentsObserver = new MutationObserver(check);
+    clearTimeout(state.commentsCheckTimer);
+    state.commentsCheckTimer = 0;
+    state.commentsObserver = new MutationObserver(() => {
+      if (state.commentsCheckTimer) return;
+      state.commentsCheckTimer = window.setTimeout(() => {
+        state.commentsCheckTimer = 0;
+        check();
+      }, COMMENTS_CHECK_MS);
+    });
     state.commentsObserver.observe(state.commentsNode, { childList: true, subtree: true });
     check();
   }
@@ -585,6 +603,8 @@
     if (!replacement && (!current || current.parentNode === state.commentsPane)) return;
 
     state.commentsObserver?.disconnect();
+    clearTimeout(state.commentsCheckTimer);
+    state.commentsCheckTimer = 0;
     clearTimeout(state.commentsTimeout);
     clearTimeout(state.unavailableTimer);
     if (replacement !== current && current?.parentNode === state.commentsPane) current.remove();
@@ -672,9 +692,15 @@
     const inner = state.watch?.querySelector(SELECTORS.secondaryInner);
     if (!inner) return;
     const generation = state.generation;
-    state.specialObserver = new MutationObserver(() => requestAnimationFrame(() => {
-      if (generation === state.generation) syncSpecialPanel();
-    }));
+    let pending = false;
+    state.specialObserver = new MutationObserver((records) => {
+      if (pending || (state.root && records.every((record) => !record.target.isConnected || state.root.contains(record.target)))) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        if (generation === state.generation) syncSpecialPanel();
+      });
+    });
     state.specialObserver.observe(inner, {
       attributes: true,
       attributeFilter: ['visibility', 'hidden', 'collapsed'],
@@ -778,6 +804,8 @@
     clearTimeout(state.mountTimeout);
     clearTimeout(state.unavailableTimer);
     clearTimeout(state.commentsTimeout);
+    clearTimeout(state.commentsCheckTimer);
+    state.commentsCheckTimer = 0;
     clearTimeout(state.retryTimer);
     state.specialObserver?.disconnect();
     state.commentsObserver?.disconnect();
@@ -833,9 +861,23 @@
     }
   }
 
+  function isInsideAdoptedContent(node) {
+    return Boolean(state.commentsNode?.contains(node) || state.relatedNode?.contains(node));
+  }
+
+  const onlyAdoptedChanges = (records) => records.every((record) => !record.target.isConnected || isInsideAdoptedContent(record.target));
+
   function scheduleEvaluation(delay = 80) {
     clearTimeout(state.evaluationTimer);
-    state.evaluationTimer = window.setTimeout(evaluate, delay);
+    const run = () => {
+      const wait = SCROLL_IDLE_MS - (performance.now() - state.lastPaneScrollAt);
+      if (state.lastPaneScrollAt > 0 && wait > 0) {
+        state.evaluationTimer = window.setTimeout(run, wait);
+        return;
+      }
+      evaluate();
+    };
+    state.evaluationTimer = window.setTimeout(run, delay);
   }
 
   function retargetObserver() {
@@ -843,7 +885,9 @@
     if (!target || target === state.observerTarget) return;
     state.appObserver?.disconnect();
     state.observerTarget = target;
-    state.appObserver = new MutationObserver(() => scheduleEvaluation());
+    state.appObserver = new MutationObserver((records) => {
+      if (!onlyAdoptedChanges(records)) scheduleEvaluation();
+    });
     state.appObserver.observe(target, {
       attributes: true,
       attributeFilter: [
@@ -873,9 +917,9 @@
 
   function boot() {
     addStyles();
-    state.appObserver = new MutationObserver(() => {
+    state.appObserver = new MutationObserver((records) => {
       retargetObserver();
-      scheduleEvaluation();
+      if (!onlyAdoptedChanges(records)) scheduleEvaluation();
     });
     state.observerTarget = document.documentElement;
     state.appObserver.observe(document.documentElement, { childList: true, subtree: true });
