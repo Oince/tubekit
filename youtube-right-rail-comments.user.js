@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.8
+// @version      0.3.9
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -113,16 +113,36 @@
       }
 
       #${SCRIPT_ID}-root {
+        --${SCRIPT_ID}-bg: var(--yt-sys-color-baseline--base-background, var(--yt-spec-base-background, #fff));
+        --${SCRIPT_ID}-text: var(--yt-sys-color-baseline--text-primary, var(--yt-spec-text-primary, #0f0f0f));
+        --${SCRIPT_ID}-text-secondary: var(--yt-sys-color-baseline--text-secondary, var(--yt-spec-text-secondary, #606060));
+        --${SCRIPT_ID}-outline: var(--yt-sys-color-baseline--outline, var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1)));
+        --${SCRIPT_ID}-hover: var(--yt-sys-color-baseline--additive-background, var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .05)));
+        --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1)));
+        --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #0f0f0f);
+        --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #fff));
         box-sizing: border-box;
         display: flex;
         flex: 1 1 auto;
         flex-direction: column;
         min-height: 180px;
         overflow: hidden;
-        color: var(--yt-spec-text-primary, #0f0f0f);
-        background: var(--yt-spec-base-background, #fff);
-        border: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1));
+        color: var(--${SCRIPT_ID}-text);
+        background: var(--${SCRIPT_ID}-bg);
+        border: 1px solid var(--${SCRIPT_ID}-outline);
         border-radius: 12px;
+      }
+
+      html[dark] #${SCRIPT_ID}-root {
+        color-scheme: dark;
+        --${SCRIPT_ID}-bg: var(--yt-sys-color-baseline--base-background, var(--yt-spec-base-background, #0f0f0f));
+        --${SCRIPT_ID}-text: var(--yt-sys-color-baseline--text-primary, var(--yt-spec-text-primary, #f1f1f1));
+        --${SCRIPT_ID}-text-secondary: var(--yt-sys-color-baseline--text-secondary, var(--yt-spec-text-secondary, #aaa));
+        --${SCRIPT_ID}-outline: var(--yt-sys-color-baseline--outline, var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .2)));
+        --${SCRIPT_ID}-hover: var(--yt-sys-color-baseline--additive-background, var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .1)));
+        --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(255, 255, 255, .2)));
+        --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #f1f1f1);
+        --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #0f0f0f));
       }
 
       #${SCRIPT_ID}-root[data-suspended='true'] {
@@ -137,8 +157,8 @@
         flex: 0 0 auto;
         gap: 4px;
         padding: 8px;
-        background: var(--yt-spec-base-background, #fff);
-        border-bottom: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1));
+        background: var(--${SCRIPT_ID}-bg);
+        border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
       }
 
       .${SCRIPT_ID}-tab {
@@ -147,7 +167,7 @@
         height: 38px;
         padding: 0 12px;
         overflow: hidden;
-        color: var(--yt-spec-text-secondary, #606060);
+        color: var(--${SCRIPT_ID}-text-secondary);
         font: 500 14px/38px Roboto, Arial, sans-serif;
         text-align: center;
         text-overflow: ellipsis;
@@ -159,12 +179,12 @@
       }
 
       .${SCRIPT_ID}-tab:hover {
-        background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .08));
+        background: var(--${SCRIPT_ID}-hover);
       }
 
       .${SCRIPT_ID}-tab[aria-selected='true'] {
-        color: var(--yt-spec-text-primary, #0f0f0f);
-        background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1));
+        color: var(--${SCRIPT_ID}-text);
+        background: var(--${SCRIPT_ID}-selected);
         font-weight: 600;
       }
 
@@ -215,7 +235,7 @@
         place-content: center;
         gap: 12px;
         padding: 24px;
-        color: var(--yt-spec-text-secondary, #606060);
+        color: var(--${SCRIPT_ID}-text-secondary);
         font: 400 14px/20px Roboto, Arial, sans-serif;
         text-align: center;
       }
@@ -224,10 +244,10 @@
         justify-self: center;
         height: 36px;
         padding: 0 16px;
-        color: var(--yt-spec-text-primary, #0f0f0f);
+        color: var(--${SCRIPT_ID}-text);
         font: 500 14px/36px Roboto, Arial, sans-serif;
         cursor: pointer;
-        background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1));
+        background: var(--${SCRIPT_ID}-selected);
         border: 0;
         border-radius: 18px;
       }
@@ -240,10 +260,10 @@
         left: 12px;
         box-sizing: border-box;
         padding: 12px 14px;
-        color: var(--yt-spec-text-primary-inverse, #fff);
+        color: var(--${SCRIPT_ID}-toast-text);
         font: 400 13px/18px Roboto, Arial, sans-serif;
         pointer-events: none;
-        background: rgba(30, 30, 30, .94);
+        background: var(--${SCRIPT_ID}-toast-bg);
         border-radius: 8px;
         opacity: 0;
         transform: translateY(8px);

@@ -13,11 +13,12 @@ async function setup(t, {
   primary = { width: 900, left: 0, right: 900 },
   secondary = { width: 400, left: 920, right: 1320 },
   expectRoot = true,
+  htmlAttrs = '',
 } = {}) {
   const content = disabled
     ? '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>'
     : '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
-  const dom = new JSDOM(`<html lang="en"><head></head><body><ytd-app>
+  const dom = new JSDOM(`<html lang="en" ${htmlAttrs}><head></head><body><ytd-app>
     <ytd-watch-flexy video-id="A"><div id="primary"><div id="below">
       <ytd-comments id="comments">${content}</ytd-comments>
     </div></div><div id="secondary"><div id="secondary-inner">
@@ -253,4 +254,49 @@ test('navigating to another video resets the selected tab to comments', async t 
   await sleep(300);
   assert.ok(document.querySelector('#ytrrc-root'));
   assert.equal(selected(document), 'comments');
+});
+
+const SYS = n => `var(--yt-sys-color-baseline--${n}, `;
+function expectedTokens(d) {
+  return new Map([
+    ['bg', `${SYS('base-background')}var(--yt-spec-base-background, ${d.bg}))`],
+    ['text', `${SYS('text-primary')}var(--yt-spec-text-primary, ${d.text}))`],
+    ['text-secondary', `${SYS('text-secondary')}var(--yt-spec-text-secondary, ${d.secondary}))`],
+    ['outline', `${SYS('outline')}var(--yt-spec-10-percent-layer, ${d.outline}))`],
+    ['hover', `${SYS('additive-background')}var(--yt-spec-10-percent-layer, ${d.hover}))`],
+    ['selected', `${SYS('button-chip-background-hover')}var(--yt-spec-badge-chip-background, ${d.selected}))`],
+    ['toast-bg', `${SYS('inverted-background')}${d.toastBg})`],
+    ['toast-text', `${SYS('text-primary-inverse')}var(--yt-spec-text-primary-inverse, ${d.toastText}))`],
+  ]);
+}
+const LIGHT = { bg: '#fff', text: '#0f0f0f', secondary: '#606060', outline: 'rgba(0, 0, 0, .1)', hover: 'rgba(0, 0, 0, .05)', selected: 'rgba(0, 0, 0, .1)', toastBg: '#0f0f0f', toastText: '#fff' };
+const DARK = { bg: '#0f0f0f', text: '#f1f1f1', secondary: '#aaa', outline: 'rgba(255, 255, 255, .2)', hover: 'rgba(255, 255, 255, .1)', selected: 'rgba(255, 255, 255, .2)', toastBg: '#f1f1f1', toastText: '#0f0f0f' };
+
+function parseTokens(block) {
+  const map = new Map();
+  for (const m of block.matchAll(/--ytrrc-([\w-]+):\s*([^;]+);/g)) map.set(m[1], m[2].trim());
+  return map;
+}
+
+function checkStyles(css) {
+  const lightRule = css.match(/#ytrrc-root \{[^}]*\}/);
+  const darkRule = css.match(/html\[dark\] #ytrrc-root \{[^}]*\}/);
+  assert.ok(lightRule && darkRule, 'light and dark rules exist');
+  assert.match(darkRule[0], /color-scheme: dark;/);
+  const light = parseTokens(lightRule[0]);
+  const dark = parseTokens(darkRule[0]);
+  assert.deepEqual([...light.keys()].sort(), [...dark.keys()].sort());
+  assert.deepEqual(light, expectedTokens(LIGHT));
+  assert.deepEqual(dark, expectedTokens(DARK));
+  assert.match(lightRule[0], /color: var\(--ytrrc-text\);/);
+  assert.match(lightRule[0], /background: var\(--ytrrc-bg\);/);
+  assert.match(css.match(/#ytrrc-tabs \{[^}]*\}/)[0], /background: var\(--ytrrc-bg\);/);
+  assert.match(css.match(/#ytrrc-toast \{[^}]*\}/)[0], /background: var\(--ytrrc-toast-bg\);/);
+  const rest = css.replace(lightRule[0], '').replace(darkRule[0], '');
+  assert.doesNotMatch(rest, /--yt-spec-|--yt-sys-/);
+}
+
+test('dark mode: panel tokens have exact light/dark fallbacks and elements use them', async t => {
+  const { document } = await setup(t, { htmlAttrs: 'dark' });
+  checkStyles(document.getElementById('ytrrc-styles').textContent);
 });
