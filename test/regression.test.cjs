@@ -19,7 +19,7 @@ async function setup(t, {
     ? '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>'
     : '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
   const dom = new JSDOM(`<html lang="en" ${htmlAttrs}><head></head><body><ytd-app>
-    <ytd-watch-flexy video-id="A"><div id="primary"><div id="below">
+    <ytd-watch-flexy video-id="A"><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
       <ytd-comments id="comments">${content}</ytd-comments>
     </div></div><div id="secondary"><div id="secondary-inner">
       <div id="related">related</div>
@@ -361,4 +361,119 @@ test('comment mutation bursts are checked at most once per throttle window', asy
   assert.equal(calls, 0);
   await sleep(400);
   assert.ok(calls > 0 && calls <= 4, `querySelector calls: ${calls}`);
+});
+
+test('mutations inside the player do not trigger evaluation', async t => {
+  const { w, document } = await setup(t);
+  const count = w.evaluationCount;
+  const player = document.querySelector('#movie_player');
+  for (let i = 0; i < 5; i++) {
+    player.appendChild(document.createElement('div'));
+    await sleep(30);
+  }
+  await sleep(300);
+  assert.equal(w.evaluationCount, count);
+});
+
+test('mutations outside the player still trigger evaluation', async t => {
+  const { w, document } = await setup(t);
+  const count = w.evaluationCount;
+  document.querySelector('#below').appendChild(document.createElement('div'));
+  await sleep(300);
+  assert.ok(w.evaluationCount > count);
+});
+
+test('scroll events do not read scrollTop and tab switching restores each position', async t => {
+  const { w, document } = await setup(t);
+  const spy = pane => {
+    const spyState = { reads: 0, value: 0 };
+    Object.defineProperty(pane, 'scrollTop', {
+      configurable: true,
+      get() { spyState.reads++; return spyState.value; },
+      set(v) { spyState.value = v; },
+    });
+    return spyState;
+  };
+  const commentsPane = document.querySelector('#ytrrc-comments-pane');
+  const relatedPane = document.querySelector('#ytrrc-related-pane');
+  const comments = spy(commentsPane);
+  const related = spy(relatedPane);
+  const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
+
+  comments.value = 300;
+  comments.reads = 0;
+  commentsPane.dispatchEvent(new w.Event('scroll'));
+  relatedPane.dispatchEvent(new w.Event('scroll'));
+  assert.equal(comments.reads, 0);
+  assert.equal(related.reads, 0);
+
+  const tab = name => document.querySelector(`[role="tab"][data-tab="${name}"]`);
+  tab('related').click();
+  await raf();
+  await raf();
+  related.value = 700;
+  tab('comments').click();
+  await raf();
+  await raf();
+  assert.equal(comments.value, 300);
+  tab('related').click();
+  await raf();
+  await raf();
+  assert.equal(related.value, 700);
+});
+
+test('long comment and related lists skip off-screen rendering', async t => {
+  const { document } = await setup(t);
+  const css = document.getElementById('ytrrc-styles').textContent;
+  assert.match(css, /ytd-comment-thread-renderer[^{]*\{[^}]*content-visibility: auto;/);
+  assert.match(css, /yt-lockup-view-model[^{]*\{[^}]*content-visibility: auto;/);
+});
+
+function spyScrollTop(pane) {
+  const spyState = { value: 0, hidden: false };
+  Object.defineProperty(pane, 'scrollTop', {
+    configurable: true,
+    get() { return spyState.hidden ? 0 : spyState.value; },
+    set(v) { spyState.value = v; },
+  });
+  return spyState;
+}
+
+test('re-selecting the same tab keeps the scroll position', async t => {
+  const { w, document } = await setup(t);
+  const comments = spyScrollTop(document.querySelector('#ytrrc-comments-pane'));
+  const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
+  comments.value = 300;
+  document.querySelector('[role="tab"][data-tab="comments"]').click();
+  await raf();
+  await raf();
+  assert.equal(comments.value, 300);
+});
+
+test('scroll position survives opening and closing a special panel on both tabs', async t => {
+  const { w, document } = await setup(t);
+  const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
+  const panes = {
+    comments: spyScrollTop(document.querySelector('#ytrrc-comments-pane')),
+    related: spyScrollTop(document.querySelector('#ytrrc-related-pane')),
+  };
+  for (const tab of ['comments', 'related']) {
+    document.querySelector(`[role="tab"][data-tab="${tab}"]`).click();
+    await raf();
+    await raf();
+    panes[tab].value = 300;
+    const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
+    panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+    document.querySelector('#secondary-inner').append(panel);
+    await sleep(200);
+    assert.equal(document.querySelector('#ytrrc-root').dataset.suspended, 'true');
+    panes[tab].hidden = true;
+    panel.remove();
+    await sleep(200);
+    panes[tab].hidden = false;
+    await raf();
+    await raf();
+    assert.equal(document.querySelector('#ytrrc-root').dataset.suspended, 'false');
+    assert.equal(panes[tab].value, 300, `${tab} scroll restored`);
+  }
 });

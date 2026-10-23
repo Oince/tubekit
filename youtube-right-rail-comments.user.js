@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.10
+// @version      0.3.11
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -216,6 +216,13 @@
         display: block;
       }
 
+      #${SCRIPT_ID}-comments-pane ytd-comment-thread-renderer,
+      #${SCRIPT_ID}-related-pane ytd-compact-video-renderer,
+      #${SCRIPT_ID}-related-pane yt-lockup-view-model {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 150px;
+      }
+
       #${SCRIPT_ID}-comments-pane > ytd-comments#comments {
         box-sizing: border-box !important;
         width: 100% !important;
@@ -422,9 +429,9 @@
     commentsPane.dataset.tab = 'comments';
     commentsPane.setAttribute('role', 'tabpanel');
     commentsPane.setAttribute('aria-labelledby', `${SCRIPT_ID}-comments-tab`);
+    // Only record the time; scrollTop is read when switching tabs or tearing down.
     commentsPane.addEventListener('scroll', () => {
       state.lastPaneScrollAt = performance.now();
-      if (state.activeTab === 'comments') state.scrollTop.comments = commentsPane.scrollTop;
     }, { passive: true });
 
     const relatedPane = document.createElement('div');
@@ -435,7 +442,6 @@
     relatedPane.setAttribute('aria-labelledby', `${SCRIPT_ID}-related-tab`);
     relatedPane.addEventListener('scroll', () => {
       state.lastPaneScrollAt = performance.now();
-      if (state.activeTab === 'related') state.scrollTop.related = relatedPane.scrollTop;
     }, { passive: true });
 
     const toast = document.createElement('div');
@@ -460,16 +466,20 @@
     const relatedTab = state.root.querySelector(`[data-tab='related'].${SCRIPT_ID}-tab`);
     if (commentsTab && commentsTab.textContent !== text.comments) commentsTab.textContent = text.comments;
     if (relatedTab && relatedTab.textContent !== text.related) relatedTab.textContent = text.related;
-    state.root.setAttribute('aria-label', `${text.comments} / ${text.related}`);
+    const label = `${text.comments} / ${text.related}`;
+    if (state.root.getAttribute('aria-label') !== label) state.root.setAttribute('aria-label', label);
+  }
+
+  function saveActiveScrollTop() {
+    const pane = state.activeTab === 'comments' ? state.commentsPane : state.relatedPane;
+    if (pane) state.scrollTop[state.activeTab] = pane.scrollTop;
   }
 
   function switchTab(tabName, options = {}) {
     if (!state.root || !['comments', 'related'].includes(tabName)) return;
 
-    const previousPane = tabName === 'comments' ? state.relatedPane : state.commentsPane;
-    if (previousPane && state.activeTab !== tabName) {
-      state.scrollTop[state.activeTab] = previousPane.scrollTop;
-    }
+    // Save the current position even when re-selecting the same tab; keepSaved skips it for panes that were hidden.
+    if (!options.keepSaved) saveActiveScrollTop();
 
     state.activeTab = tabName;
     state.root.querySelectorAll(`.${SCRIPT_ID}-tab`).forEach((button) => {
@@ -672,6 +682,7 @@
     if (special && !state.suspendedBy) {
       state.tabBeforeSpecialPanel = state.activeTab;
       state.suspendedBy = special;
+      saveActiveScrollTop();
       state.root.dataset.suspended = 'true';
       return;
     }
@@ -680,7 +691,7 @@
       const previous = state.suspendedBy;
       state.suspendedBy = null;
       state.root.dataset.suspended = 'false';
-      switchTab(previous === 'chat' ? 'comments' : state.tabBeforeSpecialPanel);
+      switchTab(previous === 'chat' ? 'comments' : state.tabBeforeSpecialPanel, { keepSaved: true });
       return;
     }
 
@@ -744,7 +755,7 @@
   }
 
   function mount(watch) {
-    if (!isEligible(watch) || state.root?.isConnected) return;
+    if (state.root?.isConnected) return;
 
     const secondaryInner = watch.querySelector(SELECTORS.secondaryInner);
     const related = findNativeRelated(watch);
@@ -851,9 +862,10 @@
       state.root.parentNode !== watch?.querySelector(SELECTORS.secondaryInner) ||
       !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane)
     );
-    if (wrongGeneration || brokenRoot || (state.root && !isEligible(watch))) teardown();
+    const eligible = isEligible(watch);
+    if (wrongGeneration || brokenRoot || (state.root && !eligible)) teardown();
 
-    if (!state.root && isEligible(watch)) mount(watch);
+    if (!state.root && eligible) mount(watch);
     if (state.root) {
       syncReplacedComments();
       syncReplacedRelated();
@@ -865,7 +877,10 @@
     return Boolean(state.commentsNode?.contains(node) || state.relatedNode?.contains(node));
   }
 
-  const onlyAdoptedChanges = (records) => records.every((record) => !record.target.isConnected || isInsideAdoptedContent(record.target));
+  // Player internals (time display, captions, tooltips) churn during playback but never affect the layout decision.
+  const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || Boolean(node.closest?.('#movie_player, ytd-player'));
+
+  const onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
 
   function scheduleEvaluation(delay = 80) {
     clearTimeout(state.evaluationTimer);
@@ -886,7 +901,7 @@
     state.appObserver?.disconnect();
     state.observerTarget = target;
     state.appObserver = new MutationObserver((records) => {
-      if (!onlyAdoptedChanges(records)) scheduleEvaluation();
+      if (!onlyIrrelevantChanges(records)) scheduleEvaluation();
     });
     state.appObserver.observe(target, {
       attributes: true,
@@ -919,7 +934,7 @@
     addStyles();
     state.appObserver = new MutationObserver((records) => {
       retargetObserver();
-      if (!onlyAdoptedChanges(records)) scheduleEvaluation();
+      if (!onlyIrrelevantChanges(records)) scheduleEvaluation();
     });
     state.observerTarget = document.documentElement;
     state.appObserver.observe(document.documentElement, { childList: true, subtree: true });
