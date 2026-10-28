@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.12
+// @version      0.3.13
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -531,18 +531,10 @@
     }, 4_500);
   }
 
+  // Language-independent: a message renderer without a header or any thread means comments are off.
   function commentsUnavailable(node) {
-    const message = node?.querySelector('ytd-message-renderer, #message');
-    if (!message) return false;
-    const value = (message.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return [
-      'comments are turned off',
-      'comments are disabled',
-      'comments are unavailable',
-      '댓글이 사용 중지',
-      '댓글을 사용할 수 없',
-      '댓글이 꺼져',
-    ].some((needle) => value.includes(needle));
+    if (!node?.querySelector('ytd-message-renderer, #message')) return false;
+    return !node.querySelector('ytd-comments-header-renderer, ytd-comment-thread-renderer');
   }
 
   function observeComments() {
@@ -900,6 +892,9 @@
   // Player internals (time display, captions, tooltips) churn during playback but never affect the layout decision.
   const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || Boolean(node.closest?.('#movie_player, ytd-player'));
 
+  // Off the watch page with no panel there is nothing to lay out or tear down.
+  const isIdleOffWatch = () => !state.root && location.pathname !== '/watch';
+
   const onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
 
   function scheduleEvaluation(delay = 80) {
@@ -921,6 +916,7 @@
     state.appObserver?.disconnect();
     state.observerTarget = target;
     state.appObserver = new MutationObserver((records) => {
+      if (isIdleOffWatch()) return;
       if (!onlyIrrelevantChanges(records)) scheduleEvaluation();
     });
     state.appObserver.observe(target, {
@@ -954,6 +950,7 @@
     addStyles();
     state.appObserver = new MutationObserver((records) => {
       retargetObserver();
+      if (isIdleOffWatch()) return;
       if (!onlyIrrelevantChanges(records)) scheduleEvaluation();
     });
     state.observerTarget = document.documentElement;

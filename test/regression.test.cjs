@@ -9,6 +9,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function setup(t, {
   disabled = false,
+  disabledText = 'Comments are turned off',
   innerWidth = 1440,
   primary = { width: 900, left: 0, right: 900 },
   secondary = { width: 400, left: 920, right: 1320 },
@@ -16,7 +17,7 @@ async function setup(t, {
   htmlAttrs = '',
 } = {}) {
   const content = disabled
-    ? '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>'
+    ? `<ytd-message-renderer>${disabledText}</ytd-message-renderer>`
     : '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
   const dom = new JSDOM(`<html lang="en" ${htmlAttrs}><head></head><body><ytd-app>
     <ytd-watch-flexy video-id="A"><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
@@ -200,6 +201,79 @@ test('unavailable comments still switch to related on the current video', async 
   const { document } = await setup(t, { disabled: true });
   await sleep(850);
   assert.equal(selected(document), 'related');
+});
+
+test('unavailable comments are detected structurally in any language', async t => {
+  const { document } = await setup(t, { disabled: true, disabledText: 'コメントはオフになっています。' });
+  await sleep(850);
+  assert.equal(selected(document), 'related');
+});
+
+test('comments with a header are not unavailable even when a message is present', async t => {
+  const { document } = await setup(t);
+  document.querySelector('#comments').insertAdjacentHTML('beforeend', '<ytd-message-renderer>Kommentare sind deaktiviert.</ytd-message-renderer>');
+  await sleep(1200);
+  assert.equal(selected(document), 'comments');
+});
+
+test('DOM changes off the watch page skip evaluation, and returning to /watch restores the panel', async t => {
+  const { w, document } = await setup(t);
+  document.dispatchEvent(new w.Event('yt-navigate-start'));
+  w.history.pushState({}, '', '/');
+  await sleep(400);
+  assert.equal(document.querySelector('#ytrrc-root'), null);
+  const count = w.evaluationCount;
+  document.querySelector('ytd-app').appendChild(document.createElement('div'));
+  await sleep(400);
+  assert.equal(w.evaluationCount, count);
+  w.history.pushState({}, '', '/watch?v=A');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  await sleep(500);
+  assert.ok(document.querySelector('#ytrrc-root'));
+});
+
+test('thread-only comments without a header are not unavailable', async t => {
+  const { document } = await setup(t);
+  const comments = document.querySelector('#comments');
+  comments.innerHTML = '<ytd-message-renderer>Kommentare sind deaktiviert.</ytd-message-renderer><ytd-comment-thread-renderer></ytd-comment-thread-renderer>';
+  await sleep(1300);
+  assert.equal(selected(document), 'comments');
+});
+
+test('booting off the watch page ignores DOM changes, then builds the panel on /watch', async t => {
+  const dom = new JSDOM('<html lang="en"><head></head><body></body></html>', {
+    url: 'https://www.youtube.com/',
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  const document = w.document;
+  w.innerWidth = 1440;
+  w.HTMLElement.prototype.getClientRects = function () { return [{}]; };
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.id === 'primary' ? { width: 900, left: 0, right: 900 } : { width: 400, left: 920, right: 1320 };
+  };
+  w.eval(script.replace('function evaluate() {', 'function evaluate() { window.evaluationCount = (window.evaluationCount || 0) + 1;'));
+  await sleep(400);
+  let count = w.evaluationCount || 0;
+  document.body.appendChild(document.createElement('div'));
+  await sleep(400);
+  assert.equal(w.evaluationCount || 0, count);
+  const app = document.createElement('ytd-app');
+  document.body.appendChild(app);
+  await sleep(400);
+  count = w.evaluationCount || 0;
+  app.appendChild(document.createElement('div'));
+  await sleep(400);
+  assert.equal(w.evaluationCount || 0, count);
+  w.history.pushState({}, '', '/watch?v=A');
+  app.innerHTML = `<ytd-watch-flexy video-id="A"><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
+    <ytd-comments id="comments"><ytd-comments-header-renderer></ytd-comments-header-renderer></ytd-comments></div></div>
+    <div id="secondary"><div id="secondary-inner"><div id="related">related</div></div></div></ytd-watch-flexy>`;
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  await sleep(500);
+  assert.ok(document.querySelector('#ytrrc-root'));
 });
 
 test('keyboard arrows wrap and Home/End activate and focus the target tab', async t => {
