@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.11
+// @version      0.3.12
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -221,6 +221,26 @@
       #${SCRIPT_ID}-related-pane yt-lockup-view-model {
         content-visibility: auto;
         contain-intrinsic-size: auto 150px;
+      }
+
+      #${SCRIPT_ID}-comments-pane ytd-comment-thread-renderer:has(ytd-commentbox[is-emoji-picker-displayed]) {
+        content-visibility: visible;
+      }
+
+      #${SCRIPT_ID}-comments-pane ytd-commentbox #emojis {
+        box-sizing: border-box !important;
+        width: auto !important;
+        max-width: 100% !important;
+        right: 0 !important;
+      }
+
+      #${SCRIPT_ID}-comments-pane ytd-commentbox yt-emoji-picker-renderer,
+      #${SCRIPT_ID}-comments-pane ytd-commentbox yt-emoji-picker-renderer #categories-wrapper,
+      #${SCRIPT_ID}-comments-pane ytd-commentbox yt-emoji-picker-renderer #category-buttons,
+      #${SCRIPT_ID}-comments-pane ytd-commentbox yt-emoji-picker-renderer #search-panel {
+        box-sizing: border-box !important;
+        width: 100% !important;
+        max-width: 100% !important;
       }
 
       #${SCRIPT_ID}-comments-pane > ytd-comments#comments {

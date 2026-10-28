@@ -429,6 +429,14 @@ test('long comment and related lists skip off-screen rendering', async t => {
   assert.match(css, /yt-lockup-view-model[^{]*\{[^}]*content-visibility: auto;/);
 });
 
+test('emoji picker is not clipped inside the comments pane', async t => {
+  const { document } = await setup(t);
+  const css = document.getElementById('ytrrc-styles').textContent;
+  assert.match(css, /ytd-comment-thread-renderer:has\(ytd-commentbox\[is-emoji-picker-displayed\]\)[^{]*\{[^}]*content-visibility: visible;/);
+  assert.match(css, /ytd-commentbox #emojis[^{]*\{[^}]*width: auto !important;[^}]*max-width: 100% !important;/);
+  assert.match(css, /yt-emoji-picker-renderer #search-panel[^{]*\{[^}]*width: 100% !important;/);
+});
+
 function spyScrollTop(pane) {
   const spyState = { value: 0, hidden: false };
   Object.defineProperty(pane, 'scrollTop', {
