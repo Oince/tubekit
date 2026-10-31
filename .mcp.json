@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ],
+      "env": {}
+    },
+    "safari-mcp": {
+      "type": "stdio",
+      "command": "/usr/bin/safaridriver",
+      "args": [
+        "--mcp"
+      ],
+      "env": {}
+    }
+  }
+}
