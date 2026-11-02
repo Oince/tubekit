@@ -2,7 +2,7 @@
 // @name         YouTube Right Rail Comments
 // @name:ko      YouTube 오른쪽 댓글 패널
 // @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.13
+// @version      0.3.14
 // @author       Oince
 // @homepageURL  https://github.com/Oince/youtube-right-rail-comments
 // @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
@@ -799,7 +799,7 @@
     waitForComments(generation);
   }
 
-  function restoreNode(node, homeMarker, kind) {
+  function restoreNode(node, homeMarker, kind, beforeNode = null) {
     const watch = state.watch;
     // Never put an old video's content into a reused watch renderer.
     if (!node || !watch?.isConnected || watch.getAttribute('video-id') !== state.videoId) {
@@ -810,6 +810,18 @@
     if (native) {
       homeMarker?.remove();
       return;
+    }
+    // YouTube moved related itself (e.g. into the one-column layout): keep its position instead of the old marker.
+    if (kind === 'related' && node.parentNode !== state.relatedPane) {
+      if (node.isConnected && watch.contains(node) && !state.root?.contains(node)) {
+        homeMarker?.remove();
+        return;
+      }
+      if (beforeNode?.isConnected && watch.contains(beforeNode) && !state.root?.contains(beforeNode)) {
+        beforeNode.before(node);
+        homeMarker?.remove();
+        return;
+      }
     }
     if (homeMarker?.isConnected && watch.contains(homeMarker)) {
       homeMarker.replaceWith(node);
@@ -838,8 +850,10 @@
     if (state.root && state.videoId) state.lastTab = { videoId: state.videoId, tab: state.activeTab };
     if (state.commentsPane) state.scrollTop.comments = state.commentsPane.scrollTop;
     if (state.relatedPane) state.scrollTop.related = state.relatedPane.scrollTop;
+    const relatedBeforeComments = state.relatedNode && state.relatedNode.nextElementSibling === state.commentsNode
+      ? state.commentsNode : null;
     restoreNode(state.commentsNode, state.commentsMarker, 'comments');
-    restoreNode(state.relatedNode, state.relatedMarker, 'related');
+    restoreNode(state.relatedNode, state.relatedMarker, 'related', relatedBeforeComments);
     state.root?.remove();
     document.documentElement.classList.remove(`${SCRIPT_ID}-active`, `${SCRIPT_ID}-suspended`);
 

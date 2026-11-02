@@ -317,6 +317,42 @@ test('selected tab survives leaving and re-entering the layout on the same video
   assert.equal(selected(document), 'related');
 });
 
+test('related moved by YouTube into the one-column layout stays before the restored comments', async t => {
+  const { w, document } = await setup(t);
+  const comments = document.querySelector('#comments');
+  const related = document.querySelector('#related');
+  // One-column YouTube puts related right before comments, which now live inside the panel.
+  comments.before(related);
+  w.innerWidth = 800;
+  await sleep(300);
+  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#below').children[0], related);
+  assert.equal(related.nextElementSibling, comments);
+  assert.equal(document.querySelector('#secondary-inner #related'), null);
+  assert.equal(document.querySelectorAll('#related').length, 1);
+  assert.equal(document.querySelectorAll('#comments').length, 1);
+
+  // Back to two columns: YouTube returns related to the secondary column and the panel is reapplied.
+  w.innerWidth = 1440;
+  document.querySelector('#secondary-inner').append(related);
+  document.querySelector('ytd-watch-flexy').setAttribute('is-two-columns_', '');
+  await sleep(300);
+  assert.ok(document.querySelector('#ytrrc-root'));
+  assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), comments);
+  assert.equal(document.querySelector('#ytrrc-related-pane #related'), related);
+});
+
+test('related moved outside the panel by YouTube is not pulled back into the hidden secondary column', async t => {
+  const { w, document } = await setup(t);
+  const related = document.querySelector('#related');
+  document.querySelector('#below').append(related);
+  w.innerWidth = 800;
+  await sleep(300);
+  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#below > #related'), related);
+  assert.equal(document.querySelector('#secondary-inner #related'), null);
+});
+
 test('navigating to another video resets the selected tab to comments', async t => {
   const { w, document, watch } = await setup(t);
   document.querySelector('#ytrrc-related-tab').click();
