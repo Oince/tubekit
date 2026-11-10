@@ -82,6 +82,7 @@
 - 모바일 화면(`m.youtube.com`)은 Chrome에서는 `emulate`로 모바일 뷰포트와 iPhone User-Agent를 주어 확인하고, Safari에서는 위의 iOS 시뮬레이터로 확인한다.
 - YouTube에 로그인하지 않는다. 로그인해야만 재현되는 문제(댓글 작성 등)는 사용자에게 알리고 직접 확인을 요청한다.
 - 쿠키·동의 팝업이 뜨면 필수가 아닌 항목은 거부한다.
+- 작업이 끝나면 에이전트가 연 것은 모두 닫는다: Chrome MCP 페이지, Safari MCP로 연 탭, 부팅한 iOS 시뮬레이터(`xcrun simctl shutdown`), 띄운 `safaridriver` 같은 보조 프로세스. 사용자가 원래 열어 둔 Safari 창·탭은 닫지 않는다.
 
 ## 기본 점검 항목
 
