@@ -22,7 +22,7 @@ export default defineConfig({
         version,
         author: 'Oince',
         description: '개인용 YouTube 편의 기능 모음.',
-        match: ['https://www.youtube.com/*'],
+        match: ['https://www.youtube.com/*', 'https://m.youtube.com/*'],
         'run-at': 'document-start',
         noframes: true,
         grant: ['window.onurlchange'],

@@ -698,6 +698,7 @@ function onUrlChanged() {
 }
 
 function boot() {
+  if (location.hostname !== 'www.youtube.com') return;
   addStyles();
   state.appObserver = new MutationObserver((records) => {
     retargetObserver();

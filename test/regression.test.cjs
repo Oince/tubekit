@@ -595,3 +595,116 @@ test('scroll position survives opening and closing a special panel on both tabs'
     assert.equal(panes[tab].value, 300, `${tab} scroll restored`);
   }
 });
+
+function shortsPage(t, url) {
+  const dom = new JSDOM('<html><head></head><body><ytd-app><div id="x"></div></ytd-app></body></html>', {
+    url,
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  const target = 'function redirectTo(url) {';
+  assert.ok(script.includes(target), 'redirectTo instrumentation target exists in the build');
+  w.redirects = [];
+  w.eval(script.replace(target, 'function redirectTo(url) { window.redirects.push(url); return;'));
+  return w;
+}
+
+function shortsEvent(w, endpoint) {
+  const event = new w.CustomEvent('yt-navigate', { bubbles: true, detail: { endpoint } });
+  w.document.querySelector('#x').dispatchEvent(event);
+  return event;
+}
+
+test('shorts: yt-navigate with reelWatchEndpoint is rewritten to a watch endpoint', t => {
+  const w = shortsPage(t, 'https://www.youtube.com/results?search_query=a');
+  const event = shortsEvent(w, {
+    clickTrackingParams: 'ctp',
+    commandMetadata: { webCommandMetadata: { url: '/shorts/abcdefghijk', webPageType: 'WEB_PAGE_TYPE_SHORTS', rootVe: 37414 } },
+    reelWatchEndpoint: { videoId: 'abcdefghijk' },
+  });
+  const ep = event.detail.endpoint;
+  assert.equal(ep.watchEndpoint.videoId, 'abcdefghijk');
+  assert.equal(ep.commandMetadata.webCommandMetadata.url, '/watch?v=abcdefghijk');
+  assert.equal(ep.commandMetadata.webCommandMetadata.webPageType, 'WEB_PAGE_TYPE_WATCH');
+  assert.equal(ep.clickTrackingParams, 'ctp');
+  assert.equal(ep.reelWatchEndpoint, undefined);
+});
+
+test('shorts: yt-navigate without reelWatchEndpoint is left alone', t => {
+  const w = shortsPage(t, 'https://www.youtube.com/results?search_query=a');
+  const endpoint = { watchEndpoint: { videoId: 'abcdefghijk' } };
+  const event = shortsEvent(w, endpoint);
+  assert.equal(event.detail.endpoint, endpoint);
+  assert.deepEqual(event.detail.endpoint, { watchEndpoint: { videoId: 'abcdefghijk' } });
+});
+
+test('shorts: opening /shorts/<id> redirects to /watch keeping other params and hash', t => {
+  const w = shortsPage(t, 'https://www.youtube.com/shorts/abcdefghijk?t=5&tubekit-dev=1#x');
+  assert.deepEqual(w.redirects, ['/watch?v=abcdefghijk&t=5&tubekit-dev=1#x']);
+});
+
+test('shorts: SPA arrival at /shorts/<id> redirects on yt-navigate-finish and popstate', t => {
+  const w = shortsPage(t, 'https://www.youtube.com/results');
+  w.history.pushState({}, '', '/shorts/abcdefghijk');
+  w.document.dispatchEvent(new w.CustomEvent('yt-navigate-finish'));
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  assert.deepEqual(w.redirects, ['/watch?v=abcdefghijk', '/watch?v=abcdefghijk']);
+});
+
+test('shorts: normal pages and invalid ids do not redirect', t => {
+  const w = shortsPage(t, 'https://www.youtube.com/watch?v=A');
+  w.document.dispatchEvent(new w.CustomEvent('yt-navigate-finish'));
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  w.history.pushState({}, '', '/shorts/');
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  w.history.pushState({}, '', '/shorts/bad');
+  w.dispatchEvent(new w.PopStateEvent('popstate'));
+  assert.deepEqual(w.redirects, []);
+});
+
+test('shorts mobile: navigate event is rewritten (endpoint and href)', t => {
+  const w = shortsPage(t, 'https://m.youtube.com/results?search_query=a');
+  const fire = detail => {
+    const event = new w.CustomEvent('navigate', { detail });
+    w.dispatchEvent(event);
+    return event;
+  };
+  const event = fire({
+    href: '/shorts/abcdefghijk',
+    endpoint: {
+      clickTrackingParams: 'ctp',
+      commandMetadata: { webCommandMetadata: { url: '/shorts/abcdefghijk', webPageType: 'WEB_PAGE_TYPE_SHORTS' } },
+      reelWatchEndpoint: { videoId: 'abcdefghijk' },
+    },
+  });
+  const ep = event.detail.endpoint;
+  assert.equal(ep.watchEndpoint.videoId, 'abcdefghijk');
+  assert.equal(ep.commandMetadata.webCommandMetadata.webPageType, 'WEB_PAGE_TYPE_WATCH');
+  assert.equal(ep.reelWatchEndpoint, undefined);
+  assert.equal(event.detail.href, '/watch?v=abcdefghijk');
+
+  const endpoint = { watchEndpoint: { videoId: 'abcdefghijk' } };
+  const other = fire({ href: '/watch?v=abcdefghijk', endpoint });
+  assert.equal(other.detail.endpoint, endpoint);
+  assert.equal(other.detail.href, '/watch?v=abcdefghijk');
+});
+
+test('shorts mobile: opening /shorts/<id> redirects to /watch', t => {
+  const w = shortsPage(t, 'https://m.youtube.com/shorts/abcdefghijk?ra=m');
+  assert.deepEqual(w.redirects, ['/watch?v=abcdefghijk&ra=m']);
+});
+
+test('shorts mobile: SPA arrival redirects on state-navigateend', t => {
+  const w = shortsPage(t, 'https://m.youtube.com/results');
+  w.history.pushState({}, '', '/shorts/abcdefghijk');
+  w.dispatchEvent(new w.CustomEvent('state-navigateend'));
+  assert.deepEqual(w.redirects, ['/watch?v=abcdefghijk']);
+});
+
+test('shorts mobile: right rail comments panel does not run on m.youtube.com', t => {
+  const w = shortsPage(t, 'https://m.youtube.com/watch?v=A');
+  assert.equal(w.document.querySelector('#tubekit-styles'), null);
+  assert.equal(w.document.querySelector('#tubekit-root'), null);
+});
