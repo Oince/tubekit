@@ -1,15 +1,11 @@
 // ==UserScript==
-// @name         YouTube Right Rail Comments
-// @name:ko      YouTube 오른쪽 댓글 패널
-// @namespace    local.codex.youtube-right-rail-comments
-// @version      0.3.14
+// @name         Tubekit
+// @namespace    oince.tubekit
+// @version      0.4.0
 // @author       Oince
-// @homepageURL  https://github.com/Oince/youtube-right-rail-comments
-// @supportURL   https://github.com/Oince/youtube-right-rail-comments/issues
-// @downloadURL  https://raw.githubusercontent.com/Oince/youtube-right-rail-comments/main/youtube-right-rail-comments.user.js
-// @updateURL    https://raw.githubusercontent.com/Oince/youtube-right-rail-comments/main/youtube-right-rail-comments.user.js
-// @description  Switch the native YouTube right rail between comments and related videos without hiding the player.
-// @description:ko YouTube 오른쪽 영역에서 댓글과 관련 동영상을 전환하며 영상을 함께 봅니다.
+// @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
+// @updateURL    https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
+// @description  개인용 YouTube 편의 기능 모음.
 // @match        https://www.youtube.com/*
 // @run-at       document-start
 // @noframes
@@ -19,7 +15,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_ID = 'ytrrc';
+  const SCRIPT_ID = 'tubekit';
   const MIN_VIEWPORT_WIDTH = 1000;
   const COMMENTS_WAIT_MS = 20_000;
   const SCROLL_IDLE_MS = 150;

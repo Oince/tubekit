@@ -1,9 +1,9 @@
 {
-  "name": "youtube-right-rail-comments",
+  "name": "tubekit",
   "private": true,
-  "version": "0.3.14",
+  "version": "0.4.0",
   "scripts": {
-    "test": "node --check youtube-right-rail-comments.user.js && node --test"
+    "test": "node --check tubekit.user.js && node --test"
   },
   "devDependencies": {
     "jsdom": "^29.0.0"

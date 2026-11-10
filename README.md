@@ -1,57 +1,28 @@
-# YouTube 오른쪽 댓글 패널
+# Tubekit
 
-영상을 보면서 오른쪽에서 댓글을 읽을 수 있는 유저스크립트입니다. 기존 플레이어와 영상 정보의 배치를 유지하면서 오른쪽 영역을 `댓글 | 관련 동영상` 탭으로 바꿉니다.
+YouTube를 쓰면서 불편했던 점을 고치는 개인용 유저스크립트입니다. Windows용 AdGuard 앱의 확장 프로그램으로 설치해 씁니다.
 
-**데스크톱 YouTube 2열 화면용입니다. 모바일 웹·YouTube 앱은 지원하지 않습니다.**
+설치·업데이트 주소:
 
-[스크립트 설치 / 다운로드](https://raw.githubusercontent.com/Oince/youtube-right-rail-comments/main/youtube-right-rail-comments.user.js) · [문제 제보](https://github.com/Oince/youtube-right-rail-comments/issues)
+```text
+https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
+```
 
-## AdGuard에 설치
+## 기능
 
-**Windows용 AdGuard 앱의 확장 프로그램 기능**을 사용합니다. AdGuard 브라우저 확장 프로그램만 사용하는 경우에는 아래 Tampermonkey 설치 방법을 이용하세요.
+### 오른쪽 댓글 패널
 
-1. AdGuard 앱의 **설정 또는 보호 → 확장 프로그램**으로 이동합니다. 메뉴 위치는 버전에 따라 다를 수 있습니다.
-2. **확장 프로그램 추가 → 파일 또는 URL에서 가져오기**를 선택합니다.
-3. 아래 주소를 붙여넣고 설치합니다.
-
-   ```text
-   https://raw.githubusercontent.com/Oince/youtube-right-rail-comments/main/youtube-right-rail-comments.user.js
-   ```
-
-4. `YouTube 오른쪽 댓글 패널`을 활성화합니다.
-5. 열려 있는 YouTube 탭을 새로고침합니다.
-
-기존 버전을 파일로 설치했다면 새 버전으로 교체하세요. 같은 스크립트를 여러 개 활성화하지 마세요.
-
-## Tampermonkey에 설치
-
-1. Chrome 또는 Edge에 Tampermonkey를 설치합니다.
-2. Tampermonkey에서 새 스크립트를 만듭니다.
-3. 기본 내용을 모두 지우고 `youtube-right-rail-comments.user.js`의 내용을 붙여넣습니다.
-4. 저장한 뒤 YouTube 영상 페이지를 새로고침합니다.
-
-## 사용
+플레이어와 영상 정보의 배치는 그대로 두고, 오른쪽 영역을 `댓글 | 관련 동영상` 탭으로 바꿉니다.
 
 - 넓은 2열 영상 화면에서는 오른쪽에 `댓글 | 관련 동영상` 탭이 나타납니다.
 - 영상에 들어가면 댓글 탭이 먼저 열립니다.
 - 두 탭은 같은 영상에서 전환하는 동안 각각의 스크롤 위치를 유지합니다.
 - 탭에 키보드 포커스를 둔 상태에서 좌우 방향키로 전환하고, Home/End로 첫 번째/마지막 탭을 선택할 수 있습니다.
-- 스크립트가 설치되어 활성화되어 있으면 지원되는 YouTube 화면에서 항상 자동으로 적용됩니다.
-- 별도의 전환 버튼은 없습니다. 원래 레이아웃을 계속 사용하려면 AdGuard에서 이 확장 프로그램을 비활성화합니다.
+- 별도의 전환 버튼은 없고 지원되는 화면에서는 항상 자동으로 적용됩니다.
 - 극장 모드, 전체화면, 미니플레이어, 좁은 단일 열 화면에서는 YouTube의 원래 레이아웃을 사용합니다.
+- 적용 주소는 `https://www.youtube.com/watch?v=...`입니다. 브라우저 화면 너비가 **1000 CSS px 이상**이고 영상과 오른쪽 영역이 나란히 배치된 2열 화면에서 동작합니다. 모니터 해상도와 다르며 브라우저 확대/축소의 영향을 받습니다.
+- `m.youtube.com`, YouTube 앱, Shorts에는 적용되지 않습니다.
 
-## 지원 환경
+## 개발
 
-- 적용 주소: `https://www.youtube.com/watch?v=...`
-- 브라우저 화면 너비가 **1000 CSS px 이상**이고 영상과 오른쪽 영역이 나란히 배치된 2열 화면에서 동작합니다. 모니터 해상도와 다르며 브라우저 확대/축소의 영향을 받습니다.
-- `m.youtube.com`, YouTube 앱, Shorts는 지원하지 않습니다.
-
-## 문제 제보
-
-YouTube의 화면 구조가 변경되면 수정이 필요할 수 있습니다. [Issues](https://github.com/Oince/youtube-right-rail-comments/issues)에 스크립트 버전, 브라우저와 설치 관리자, 영상 주소, 발생 경로(직접 열기/관련 영상 클릭/앞뒤 이동)를 적어 주세요. 가능하면 개인정보를 가린 화면도 첨부해 주세요.
-
-## 버전 기록
-
-버전별 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
-
-YouTube 또는 Google의 공식 제품이 아닙니다.
+작업 규칙은 [AGENTS.md](AGENTS.md), 버전별 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.

@@ -4,7 +4,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { JSDOM } = require('jsdom');
 
-const script = fs.readFileSync(path.join(__dirname, '../youtube-right-rail-comments.user.js'), 'utf8');
+const script = fs.readFileSync(path.join(__dirname, '../tubekit.user.js'), 'utf8');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function setup(t, {
@@ -42,7 +42,7 @@ async function setup(t, {
   // Count evaluations without changing the production script's behavior.
   w.eval(script.replace('function evaluate() {', 'function evaluate() { window.evaluationCount = (window.evaluationCount || 0) + 1;'));
   await sleep(200);
-  if (expectRoot) assert.ok(w.document.querySelector('#ytrrc-root'));
+  if (expectRoot) assert.ok(w.document.querySelector('#tubekit-root'));
   return { w, document: w.document, watch: w.document.querySelector('ytd-watch-flexy') };
 }
 
@@ -57,7 +57,7 @@ function removeMarkers(document) {
   const walker = document.createTreeWalker(document, 128);
   const markers = [];
   while (walker.nextNode()) {
-    if (walker.currentNode.data.startsWith('ytrrc:')) markers.push(walker.currentNode);
+    if (walker.currentNode.data.startsWith('tubekit:')) markers.push(walker.currentNode);
   }
   markers.forEach(node => node.remove());
 }
@@ -77,12 +77,12 @@ test('iPad Pro 11-inch Sidecar landscape creates the panel at 1194px', async t =
     primary: { width: 780, left: 16, right: 796 },
     secondary: { width: 398, left: 796, right: 1194 },
   });
-  assert.ok(document.querySelector('#ytrrc-root'));
+  assert.ok(document.querySelector('#tubekit-root'));
 });
 
 test('viewport below 1000px does not create the panel', async t => {
   const { document } = await setup(t, { innerWidth: 999, expectRoot: false });
-  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#tubekit-root'), null);
 });
 
 test('idle DOM settles instead of repeatedly evaluating', async t => {
@@ -96,12 +96,12 @@ test('detached panel is recreated and retains native content', async t => {
   const { document } = await setup(t);
   const comments = document.querySelector('#comments');
   const related = document.querySelector('#related');
-  const root = document.querySelector('#ytrrc-root');
+  const root = document.querySelector('#tubekit-root');
   root.remove();
   await sleep(200);
-  assert.notEqual(document.querySelector('#ytrrc-root'), root);
-  assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), comments);
-  assert.equal(document.querySelector('#ytrrc-related-pane #related'), related);
+  assert.notEqual(document.querySelector('#tubekit-root'), root);
+  assert.equal(document.querySelector('#tubekit-comments-pane #comments'), comments);
+  assert.equal(document.querySelector('#tubekit-related-pane #related'), related);
 });
 
 test('secondary container replacement recovers with the new related content', async t => {
@@ -112,8 +112,8 @@ test('secondary container replacement recovers with the new related content', as
   inner.innerHTML = '<div id="related">new related</div>';
   document.querySelector('#secondary-inner').replaceWith(inner);
   await sleep(200);
-  assert.ok(inner.querySelector('#ytrrc-root'));
-  assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), comments);
+  assert.ok(inner.querySelector('#tubekit-root'));
+  assert.equal(document.querySelector('#tubekit-comments-pane #comments'), comments);
   assert.equal(document.querySelector('#related').textContent, 'new related');
   assert.equal(document.querySelectorAll('#related').length, 1);
 });
@@ -125,11 +125,11 @@ test('replacement comments are adopted and observed', async t => {
   replacement.replaceChildren();
   document.querySelector('#below').append(replacement);
   await sleep(200);
-  assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), replacement);
-  assert.ok(document.querySelector('.ytrrc-status'));
+  assert.equal(document.querySelector('#tubekit-comments-pane #comments'), replacement);
+  assert.ok(document.querySelector('.tubekit-status'));
   replacement.append(document.createElement('ytd-comments-header-renderer'));
   await sleep(350);
-  assert.equal(document.querySelector('.ytrrc-status'), null);
+  assert.equal(document.querySelector('.tubekit-status'), null);
 });
 
 test('native reparenting of the existing comments is repaired', async t => {
@@ -137,7 +137,7 @@ test('native reparenting of the existing comments is repaired', async t => {
   const comments = document.querySelector('#comments');
   document.querySelector('#below').append(comments);
   await sleep(200);
-  assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), comments);
+  assert.equal(document.querySelector('#tubekit-comments-pane #comments'), comments);
   assert.equal(document.querySelectorAll('#comments').length, 1);
 });
 
@@ -149,7 +149,7 @@ test('missing markers restore both native nodes on teardown', async t => {
   await theater(watch);
   assert.equal(document.querySelector('#below #comments'), comments);
   assert.equal(document.querySelector('#secondary-inner > #related'), related);
-  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#tubekit-root'), null);
 });
 
 test('lost original parent falls back to the current primary content area', async t => {
@@ -221,7 +221,7 @@ test('DOM changes off the watch page skip evaluation, and returning to /watch re
   document.dispatchEvent(new w.Event('yt-navigate-start'));
   w.history.pushState({}, '', '/');
   await sleep(400);
-  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#tubekit-root'), null);
   const count = w.evaluationCount;
   document.querySelector('ytd-app').appendChild(document.createElement('div'));
   await sleep(400);
@@ -229,7 +229,7 @@ test('DOM changes off the watch page skip evaluation, and returning to /watch re
   w.history.pushState({}, '', '/watch?v=A');
   document.dispatchEvent(new w.Event('yt-navigate-finish'));
   await sleep(500);
-  assert.ok(document.querySelector('#ytrrc-root'));
+  assert.ok(document.querySelector('#tubekit-root'));
 });
 
 test('thread-only comments without a header are not unavailable', async t => {
@@ -273,12 +273,12 @@ test('booting off the watch page ignores DOM changes, then builds the panel on /
     <div id="secondary"><div id="secondary-inner"><div id="related">related</div></div></div></ytd-watch-flexy>`;
   document.dispatchEvent(new w.Event('yt-navigate-finish'));
   await sleep(500);
-  assert.ok(document.querySelector('#ytrrc-root'));
+  assert.ok(document.querySelector('#tubekit-root'));
 });
 
 test('keyboard arrows wrap and Home/End activate and focus the target tab', async t => {
   const { w, document } = await setup(t);
-  document.querySelector('#ytrrc-comments-tab').focus();
+  document.querySelector('#tubekit-comments-tab').focus();
   for (const [key, expected] of [['ArrowRight', 'related'], ['ArrowRight', 'comments'],
     ['ArrowLeft', 'related'], ['Home', 'comments'], ['End', 'related']]) {
     const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -298,22 +298,22 @@ test('special panels release rail clipping and closing them restores the panel',
   panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
   document.querySelector('#secondary-inner').append(panel);
   await sleep(200);
-  assert.equal(document.querySelector('#ytrrc-root').dataset.suspended, 'true');
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'true');
   assert.notEqual(w.getComputedStyle(secondary).overflow, 'hidden');
   panel.remove();
   await sleep(200);
-  assert.equal(document.querySelector('#ytrrc-root').dataset.suspended, 'false');
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
   assert.equal(w.getComputedStyle(secondary).overflow, 'hidden');
 });
 
 test('selected tab survives leaving and re-entering the layout on the same video', async t => {
   const { document, watch } = await setup(t);
-  document.querySelector('#ytrrc-related-tab').click();
+  document.querySelector('#tubekit-related-tab').click();
   await theater(watch);
-  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#tubekit-root'), null);
   watch.removeAttribute('theater');
   await sleep(200);
-  assert.ok(document.querySelector('#ytrrc-root'));
+  assert.ok(document.querySelector('#tubekit-root'));
   assert.equal(selected(document), 'related');
 });
 
@@ -325,7 +325,7 @@ test('related moved by YouTube into the one-column layout stays before the resto
   comments.before(related);
   w.innerWidth = 800;
   await sleep(300);
-  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#tubekit-root'), null);
   assert.equal(document.querySelector('#below').children[0], related);
   assert.equal(related.nextElementSibling, comments);
   assert.equal(document.querySelector('#secondary-inner #related'), null);
@@ -337,9 +337,9 @@ test('related moved by YouTube into the one-column layout stays before the resto
   document.querySelector('#secondary-inner').append(related);
   document.querySelector('ytd-watch-flexy').setAttribute('is-two-columns_', '');
   await sleep(300);
-  assert.ok(document.querySelector('#ytrrc-root'));
-  assert.equal(document.querySelector('#ytrrc-comments-pane #comments'), comments);
-  assert.equal(document.querySelector('#ytrrc-related-pane #related'), related);
+  assert.ok(document.querySelector('#tubekit-root'));
+  assert.equal(document.querySelector('#tubekit-comments-pane #comments'), comments);
+  assert.equal(document.querySelector('#tubekit-related-pane #related'), related);
 });
 
 test('related moved outside the panel by YouTube is not pulled back into the hidden secondary column', async t => {
@@ -348,21 +348,21 @@ test('related moved outside the panel by YouTube is not pulled back into the hid
   document.querySelector('#below').append(related);
   w.innerWidth = 800;
   await sleep(300);
-  assert.equal(document.querySelector('#ytrrc-root'), null);
+  assert.equal(document.querySelector('#tubekit-root'), null);
   assert.equal(document.querySelector('#below > #related'), related);
   assert.equal(document.querySelector('#secondary-inner #related'), null);
 });
 
 test('navigating to another video resets the selected tab to comments', async t => {
   const { w, document, watch } = await setup(t);
-  document.querySelector('#ytrrc-related-tab').click();
+  document.querySelector('#tubekit-related-tab').click();
   document.dispatchEvent(new w.Event('yt-navigate-start'));
   w.history.pushState({}, '', '/watch?v=B');
   watch.setAttribute('video-id', 'B');
   document.querySelector('#below').append(newComments(document));
   document.dispatchEvent(new w.Event('yt-navigate-finish'));
   await sleep(300);
-  assert.ok(document.querySelector('#ytrrc-root'));
+  assert.ok(document.querySelector('#tubekit-root'));
   assert.equal(selected(document), 'comments');
 });
 
@@ -384,13 +384,13 @@ const DARK = { bg: '#0f0f0f', text: '#f1f1f1', secondary: '#aaa', outline: 'rgba
 
 function parseTokens(block) {
   const map = new Map();
-  for (const m of block.matchAll(/--ytrrc-([\w-]+):\s*([^;]+);/g)) map.set(m[1], m[2].trim());
+  for (const m of block.matchAll(/--tubekit-([\w-]+):\s*([^;]+);/g)) map.set(m[1], m[2].trim());
   return map;
 }
 
 function checkStyles(css) {
-  const lightRule = css.match(/#ytrrc-root \{[^}]*\}/);
-  const darkRule = css.match(/html\[dark\] #ytrrc-root \{[^}]*\}/);
+  const lightRule = css.match(/#tubekit-root \{[^}]*\}/);
+  const darkRule = css.match(/html\[dark\] #tubekit-root \{[^}]*\}/);
   assert.ok(lightRule && darkRule, 'light and dark rules exist');
   assert.match(darkRule[0], /color-scheme: dark;/);
   const light = parseTokens(lightRule[0]);
@@ -398,17 +398,17 @@ function checkStyles(css) {
   assert.deepEqual([...light.keys()].sort(), [...dark.keys()].sort());
   assert.deepEqual(light, expectedTokens(LIGHT));
   assert.deepEqual(dark, expectedTokens(DARK));
-  assert.match(lightRule[0], /color: var\(--ytrrc-text\);/);
-  assert.match(lightRule[0], /background: var\(--ytrrc-bg\);/);
-  assert.match(css.match(/#ytrrc-tabs \{[^}]*\}/)[0], /background: var\(--ytrrc-bg\);/);
-  assert.match(css.match(/#ytrrc-toast \{[^}]*\}/)[0], /background: var\(--ytrrc-toast-bg\);/);
+  assert.match(lightRule[0], /color: var\(--tubekit-text\);/);
+  assert.match(lightRule[0], /background: var\(--tubekit-bg\);/);
+  assert.match(css.match(/#tubekit-tabs \{[^}]*\}/)[0], /background: var\(--tubekit-bg\);/);
+  assert.match(css.match(/#tubekit-toast \{[^}]*\}/)[0], /background: var\(--tubekit-toast-bg\);/);
   const rest = css.replace(lightRule[0], '').replace(darkRule[0], '');
   assert.doesNotMatch(rest, /--yt-spec-|--yt-sys-/);
 }
 
 test('dark mode: panel tokens have exact light/dark fallbacks and elements use them', async t => {
   const { document } = await setup(t, { htmlAttrs: 'dark' });
-  checkStyles(document.getElementById('ytrrc-styles').textContent);
+  checkStyles(document.getElementById('tubekit-styles').textContent);
 });
 
 test('mutations inside adopted comments do not trigger evaluation', async t => {
@@ -426,7 +426,7 @@ test('mutations inside adopted comments do not trigger evaluation', async t => {
 test('evaluation is deferred while the pane is scrolling', async t => {
   const { w, document } = await setup(t);
   const count = w.evaluationCount;
-  document.querySelector('#ytrrc-comments-pane').dispatchEvent(new w.Event('scroll'));
+  document.querySelector('#tubekit-comments-pane').dispatchEvent(new w.Event('scroll'));
   document.querySelector('#below').appendChild(document.createElement('div'));
   await sleep(100);
   assert.equal(w.evaluationCount, count);
@@ -436,10 +436,10 @@ test('evaluation is deferred while the pane is scrolling', async t => {
 
 test('removing comments from the pane is still detected', async t => {
   const { document } = await setup(t);
-  assert.equal(document.querySelector('.ytrrc-status'), null);
+  assert.equal(document.querySelector('.tubekit-status'), null);
   document.querySelector('#comments').remove();
   await sleep(300);
-  assert.ok(document.querySelector('.ytrrc-status'));
+  assert.ok(document.querySelector('.tubekit-status'));
 });
 
 test('mutations on nodes removed within the same batch do not trigger evaluation', async t => {
@@ -504,8 +504,8 @@ test('scroll events do not read scrollTop and tab switching restores each positi
     });
     return spyState;
   };
-  const commentsPane = document.querySelector('#ytrrc-comments-pane');
-  const relatedPane = document.querySelector('#ytrrc-related-pane');
+  const commentsPane = document.querySelector('#tubekit-comments-pane');
+  const relatedPane = document.querySelector('#tubekit-related-pane');
   const comments = spy(commentsPane);
   const related = spy(relatedPane);
   const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
@@ -534,14 +534,14 @@ test('scroll events do not read scrollTop and tab switching restores each positi
 
 test('long comment and related lists skip off-screen rendering', async t => {
   const { document } = await setup(t);
-  const css = document.getElementById('ytrrc-styles').textContent;
+  const css = document.getElementById('tubekit-styles').textContent;
   assert.match(css, /ytd-comment-thread-renderer[^{]*\{[^}]*content-visibility: auto;/);
   assert.match(css, /yt-lockup-view-model[^{]*\{[^}]*content-visibility: auto;/);
 });
 
 test('emoji picker is not clipped inside the comments pane', async t => {
   const { document } = await setup(t);
-  const css = document.getElementById('ytrrc-styles').textContent;
+  const css = document.getElementById('tubekit-styles').textContent;
   assert.match(css, /ytd-comment-thread-renderer:has\(ytd-commentbox\[is-emoji-picker-displayed\]\)[^{]*\{[^}]*content-visibility: visible;/);
   assert.match(css, /ytd-commentbox #emojis[^{]*\{[^}]*width: auto !important;[^}]*max-width: 100% !important;/);
   assert.match(css, /yt-emoji-picker-renderer #search-panel[^{]*\{[^}]*width: 100% !important;/);
@@ -559,7 +559,7 @@ function spyScrollTop(pane) {
 
 test('re-selecting the same tab keeps the scroll position', async t => {
   const { w, document } = await setup(t);
-  const comments = spyScrollTop(document.querySelector('#ytrrc-comments-pane'));
+  const comments = spyScrollTop(document.querySelector('#tubekit-comments-pane'));
   const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
   comments.value = 300;
   document.querySelector('[role="tab"][data-tab="comments"]').click();
@@ -572,8 +572,8 @@ test('scroll position survives opening and closing a special panel on both tabs'
   const { w, document } = await setup(t);
   const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
   const panes = {
-    comments: spyScrollTop(document.querySelector('#ytrrc-comments-pane')),
-    related: spyScrollTop(document.querySelector('#ytrrc-related-pane')),
+    comments: spyScrollTop(document.querySelector('#tubekit-comments-pane')),
+    related: spyScrollTop(document.querySelector('#tubekit-related-pane')),
   };
   for (const tab of ['comments', 'related']) {
     document.querySelector(`[role="tab"][data-tab="${tab}"]`).click();
@@ -584,14 +584,14 @@ test('scroll position survives opening and closing a special panel on both tabs'
     panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
     document.querySelector('#secondary-inner').append(panel);
     await sleep(200);
-    assert.equal(document.querySelector('#ytrrc-root').dataset.suspended, 'true');
+    assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'true');
     panes[tab].hidden = true;
     panel.remove();
     await sleep(200);
     panes[tab].hidden = false;
     await raf();
     await raf();
-    assert.equal(document.querySelector('#ytrrc-root').dataset.suspended, 'false');
+    assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
     assert.equal(panes[tab].value, 300, `${tab} scroll restored`);
   }
 });
