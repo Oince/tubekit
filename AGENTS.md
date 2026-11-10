@@ -6,11 +6,27 @@
 
 - Tubekit은 사용자 한 명이 쓰는 개인용 YouTube 편의 기능 모음이다. 다른 사람의 설치·호환성·문의 대응은 고려하지 않는다. 설치 안내나 공개 배포용 문서를 새로 만들지 않는다.
 - 첫 기능은 오른쪽 댓글 패널이고, 앞으로 기능을 계속 추가한다.
-- 배포물은 `tubekit.user.js` 한 파일이다. 빌드 단계가 없다.
-- 개발 환경은 Node.js 22.x(22.13 이상) 또는 24 이상이다. `npm ci` 후 `npm test`로 문법 검사와 회귀 테스트를 실행한다. jsdom은 개발용 의존성이며 배포 유저스크립트에는 포함되지 않는다.
-- 회귀 테스트(`test/regression.test.cjs`)는 DOM 교체·복원, 영상 이동 중 타이머, 유휴 상태의 반복 실행, 키보드 탭 전환, 같은 영상 내 탭 유지, 특수 패널의 CSS 해제를 확인한다.
+- 소스는 `src/`에 기능별 모듈로 두고, Vite + `vite-plugin-monkey`로 저장소 루트의 `tubekit.user.js` 한 파일로 빌드한다. 이 빌드 결과가 배포물이며 git에 함께 커밋한다. `tubekit.user.js`는 직접 고치지 않는다.
+- 개발 환경은 Node.js 22.x(22.13 이상) 또는 24 이상이다. `npm ci` 후 `npm run build`로 빌드하고, `npm test`로 문법 검사와 테스트를 실행한다. Vite·jsdom은 개발용 의존성이며 배포 유저스크립트에는 포함되지 않는다.
+- `test/build.test.cjs`는 커밋된 `tubekit.user.js`가 `src/`의 현재 빌드 결과와 같은지 확인한다. 빌드를 잊으면 `npm test`가 실패한다.
+- 회귀 테스트(`test/regression.test.cjs`)는 빌드된 `tubekit.user.js`를 jsdom에서 실행해 오른쪽 댓글 패널의 DOM 교체·복원, 영상 이동 중 타이머, 유휴 상태의 반복 실행, 키보드 탭 전환, 같은 영상 내 탭 유지, 특수 패널의 CSS 해제를 확인한다.
 - jsdom에는 레이아웃 엔진이 없어 화면 배치를 가정하므로 실제 화면 배치·무한 스크롤·댓글 작성·브라우저별 레이아웃 동작은 테스트로 확인할 수 없다. 그래서 아래의 브라우저 검증이 필수다.
 - 사용자의 실사용 환경은 Windows용 AdGuard다. MCP 검증은 macOS의 Chrome·Safari에서 하므로 Windows 환경 특유의 문제는 확인하지 못한다는 점을 보고에 감안한다.
+
+## 소스 구조와 기능 추가
+
+```text
+src/main.js                      진입점. 등록된 기능을 순서대로 start()
+src/features/index.js            기능 등록부(배열)
+src/features/<기능 id>/index.js  기능 모듈. export default { id, start() }
+vite.config.mjs                  유저스크립트 헤더와 빌드 설정
+```
+
+- 새 기능은 `src/features/<기능 id>/`에 만들고 `src/features/index.js` 배열에 한 줄 추가한다. 기능 켜기/끄기·설정 기능은 두지 않는다. 필요 없는 기능은 넣지 않거나 등록부에서 뺀다.
+- 기능 모듈은 서로 import하지 않는다. 두 기능 이상에서 실제로 쓰는 코드가 생길 때만 `src/core/`를 만들어 옮긴다.
+- 새 기능이 페이지에 붙이는 id·클래스·CSS 변수는 `tubekit-<기능 id>-` 접두어를 쓴다. 오른쪽 댓글 패널은 예전부터 쓰던 `tubekit-` 접두어(`#tubekit-root`, `#tubekit-styles` 등)를 그대로 쓴다.
+- 번들러는 모듈의 최상위 이름을 한 범위로 합치므로, 다른 기능과 이름이 겹치면 `evaluate$1`처럼 바뀐다. 회귀 테스트가 `function evaluate() {`를 찾아 계측하므로 다른 기능에서 최상위 함수 이름 `evaluate`를 쓰지 않는다.
+- 헤더(`@match`, `@grant` 등)는 `vite.config.mjs`에서 고치고, `@version`은 `package.json`의 `version`에서 가져온다.
 
 ## 동작 사양
 
@@ -32,7 +48,7 @@
 
 - 재현으로 확인한 원인에 맞춰 수정한다.
 - 가능하면 재현된 문제를 `test/regression.test.cjs`에 회귀 테스트로 추가한다. jsdom으로 표현할 수 없는 레이아웃 문제는 테스트 대신 3단계 브라우저 검증으로 보장한다.
-- `npm test`가 통과해야 다음 단계로 넘어간다.
+- `src/`를 고친 뒤 `npm run build`로 `tubekit.user.js`를 다시 만들고, `npm test`가 통과해야 다음 단계로 넘어간다.
 
 ### 3. 검증 (Chrome·Safari 모두)
 
@@ -43,9 +59,9 @@
 
 ## 브라우저에서 스크립트 실행하기
 
-사용자의 PC에는 AdGuard에 이 스크립트의 GitHub 배포본이 설치되어 있다. AdGuard 설치본은 실사용용 배포본으로 둔다. 개발 중인 코드는 MCP로 직접 주입한다.
+사용자의 PC에는 AdGuard에 이 스크립트의 GitHub 배포본이 설치되어 있다. AdGuard 설치본은 실사용용 배포본으로 둔다. 개발 중인 코드는 `npm run build`로 만든 `tubekit.user.js`를 MCP로 직접 주입한다. `src/`의 개별 모듈은 주입하지 않는다.
 
-스크립트는 IIFE이고 `GM_*` API를 쓰지 않으므로 주입하면 그대로 실행된다. 어느 브라우저든 같은 페이지에 두 벌이 실행되지 않게 한다(이벤트 리스너와 옵저버가 중복 등록됨). 주입 전에 `#tubekit-styles`가 이미 있는지 확인한다.
+빌드 결과는 IIFE이고 `GM_*` API를 쓰지 않으므로 주입하면 그대로 실행된다. 어느 브라우저든 같은 페이지에 두 벌이 실행되지 않게 한다(이벤트 리스너와 옵저버가 중복 등록됨). 주입 전에 `#tubekit-styles`가 이미 있는지 확인한다.
 
 ### Chrome (`chrome-devtools`)
 
@@ -84,7 +100,7 @@
 
 ## 버전과 문서
 
-- 기능을 추가하면 마이너 버전을, 그 밖에 동작이 바뀌는 변경은 패치 버전을 올린다. 스크립트 헤더의 `@version`, `package.json`의 `version`, `CHANGELOG.md`를 함께 갱신한다. `CHANGELOG.md`에는 맨 위에 `## X.Y.Z - YYYY-MM-DD` 제목과 변경 내용 목록을 추가하고, 사용자가 알아볼 수 있는 한국어로 쓴다. README에는 버전 기록을 쓰지 않는다.
+- 기능을 추가하면 마이너 버전을, 그 밖에 동작이 바뀌는 변경은 패치 버전을 올린다. `package.json`의 `version`(헤더의 `@version`은 빌드 때 여기서 가져옴)과 `CHANGELOG.md`를 함께 갱신하고 다시 빌드한다. `CHANGELOG.md`에는 맨 위에 `## X.Y.Z - YYYY-MM-DD` 제목과 변경 내용 목록을 추가하고, 사용자가 알아볼 수 있는 한국어로 쓴다. README에는 버전 기록을 쓰지 않는다.
 - `@downloadURL`·`@updateURL`은 GitHub `main` 브랜치의 raw 주소다. 사용자 설치본은 이 주소로 업데이트되므로 `main`에 올라간 버전은 곧바로 배포된다고 보고 다룬다.
 - 커밋 메시지는 영어로, 기존 커밋처럼 변경 내용을 한 줄로 요약하고 버전 변경이면 끝에 `in vX.Y.Z`를 붙인다.
 - 커밋과 푸시는 사용자가 요청할 때만 한다.
