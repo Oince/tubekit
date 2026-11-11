@@ -708,3 +708,177 @@ test('shorts mobile: right rail comments panel does not run on m.youtube.com', t
   assert.equal(w.document.querySelector('#tubekit-styles'), null);
   assert.equal(w.document.querySelector('#tubekit-root'), null);
 });
+
+const QUALITY_DATA = [
+  { quality: 'auto', isPlayable: true },
+  { quality: 'hd2160', isPlayable: false, formatId: { itag: 313 } },
+  { quality: 'hd1080', isPlayable: true, formatId: { itag: 137 } },
+  { quality: 'hd1080', isPlayable: true, formatId: { itag: 999 }, paygatedQualityDetails: { name: 'Premium' } },
+  { quality: 'hd720', isPlayable: true, formatId: { itag: 136 } },
+];
+
+function qualityPage(t, {
+  url = 'https://www.youtube.com/watch?v=A',
+  data = QUALITY_DATA,
+  state = -1,
+  inPlayer = true,
+  withPlayer = true,
+  videoId = 'v1',
+} = {}) {
+  const dom = new JSDOM(`<html><head></head><body><div id="movie_player">${inPlayer ? '<video></video>' : ''}</div>${inPlayer ? '' : '<video id="outside"></video>'}</body></html>`, {
+    url,
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  const player = w.document.querySelector('#movie_player');
+  w.calls = [];
+  if (withPlayer) {
+    player.getAvailableQualityData = () => data;
+    player.setPlaybackQualityRange = (...args) => w.calls.push(args);
+    player.getPlayerState = () => state;
+    w.videoId = videoId;
+    player.getVideoData = () => ({ video_id: w.videoId });
+  }
+  w.eval(script);
+  const fire = (type, el = w.document.querySelector('video')) => el.dispatchEvent(new w.Event(type));
+  return { w, fire };
+}
+
+test('max-quality: picks the highest playable quality and prefers the premium format', t => {
+  const { w, fire } = qualityPage(t);
+  fire('playing');
+  assert.deepEqual(w.calls, [['hd1080', 'hd1080', { itag: 999 }]]);
+});
+
+test('max-quality: normal entry gets no formatId; unplayable and unknown entries are skipped', t => {
+  const { w, fire } = qualityPage(t, {
+    data: [
+      { quality: 'auto', isPlayable: true },
+      { quality: 'hd2160', isPlayable: false },
+      { quality: 'hd1080', isPlayable: true, formatId: { itag: 137 } },
+      { quality: 'hd720', isPlayable: true },
+    ],
+  });
+  fire('playing');
+  assert.deepEqual(w.calls, [['hd1080', 'hd1080']]);
+});
+
+test('max-quality: pause/resume and same-video media reloads do not re-apply; a new video id does', t => {
+  const { w, fire } = qualityPage(t);
+  fire('playing');
+  fire('playing');
+  assert.equal(w.calls.length, 1);
+  // Quality change makes YouTube reload the media of the same video.
+  fire('emptied');
+  fire('loadstart');
+  fire('playing');
+  assert.equal(w.calls.length, 1);
+  w.videoId = 'v2';
+  fire('emptied');
+  fire('loadstart');
+  fire('playing');
+  assert.equal(w.calls.length, 2);
+});
+
+test('max-quality: ad-showing is skipped and the main video applies after the ad', t => {
+  const { w, fire } = qualityPage(t);
+  const player = w.document.querySelector('#movie_player');
+  player.classList.add('ad-showing');
+  w.videoId = 'ad';
+  fire('playing');
+  assert.equal(w.calls.length, 0);
+  player.classList.remove('ad-showing');
+  w.videoId = 'main';
+  fire('playing');
+  assert.equal(w.calls.length, 1);
+});
+
+test('max-quality: empty quality data is not recorded so a later playing retries', t => {
+  const data = [];
+  const { w, fire } = qualityPage(t, { data });
+  fire('playing');
+  assert.equal(w.calls.length, 0);
+  data.push({ quality: 'hd720', isPlayable: true });
+  fire('playing');
+  assert.deepEqual(w.calls, [['hd720', 'hd720']]);
+});
+
+test('max-quality: an already playing player is applied at start', t => {
+  const { w } = qualityPage(t, { state: 1 });
+  assert.equal(w.calls.length, 1);
+});
+
+test('max-quality: an existing player that is not playing waits for playing', t => {
+  const { w, fire } = qualityPage(t, { state: -1 });
+  assert.equal(w.calls.length, 0);
+  fire('playing');
+  assert.equal(w.calls.length, 1);
+});
+
+test('max-quality: works on m.youtube.com and youtube-nocookie embeds', t => {
+  for (const url of ['https://m.youtube.com/watch?v=A', 'https://www.youtube-nocookie.com/embed/abcdefghijk']) {
+    const { w, fire } = qualityPage(t, { url });
+      fire('playing');
+    assert.equal(w.calls.length, 1, url);
+  }
+});
+
+test('max-quality: a video outside #movie_player is ignored', t => {
+  const { w, fire } = qualityPage(t, { inPlayer: false });
+  const outside = w.document.querySelector('#outside');
+  fire('playing', outside);
+  assert.equal(w.calls.length, 0);
+});
+
+test('max-quality: missing player API or empty data stays quiet', t => {
+  const a = qualityPage(t, { withPlayer: false });
+  a.fire('playing');
+  const b = qualityPage(t, { data: [] });
+  b.fire('playing');
+  assert.equal(b.w.calls.length, 0);
+});
+
+test('frames: inside an iframe only frames:true features run', async t => {
+  const outer = new JSDOM('<html><body><iframe id="f"></iframe></body></html>', {
+    url: 'https://example.com/',
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => outer.window.close());
+  const fw = outer.window.document.querySelector('#f').contentWindow;
+  assert.notEqual(fw.top, fw);
+  fw.document.open();
+  fw.document.write('<html><head></head><body><ytd-app></ytd-app><div id="movie_player"><video></video></div></body></html>');
+  fw.document.close();
+  const player = fw.document.querySelector('#movie_player');
+  fw.calls = [];
+  player.getAvailableQualityData = () => QUALITY_DATA;
+  player.setPlaybackQualityRange = (...args) => fw.calls.push(args);
+  player.getPlayerState = () => -1;
+  player.getVideoData = () => ({ video_id: 'v1' });
+  fw.eval(script.replace('function redirectTo(url) {', 'function redirectTo(url) { window.redirectCount = (window.redirectCount || 0) + 1; return;'));
+  const video = fw.document.querySelector('video');
+  video.dispatchEvent(new fw.Event('playing'));
+  await sleep(50);
+  assert.equal(fw.calls.length, 1);
+  assert.equal(fw.document.querySelector('#tubekit-styles'), null);
+  assert.equal(fw.document.querySelector('#tubekit-root'), null);
+});
+
+test('frames: shorts-to-watch does not start inside an iframe but does in the top frame', t => {
+  const hook = 'function redirectIfShorts() {';
+  assert.ok(script.includes(hook), 'redirectIfShorts instrumentation target exists in the build');
+  const instrumented = script.replace(hook, hook + ' window.shortsChecks = (window.shortsChecks || 0) + 1;');
+  const outer = new JSDOM('<html><body><iframe id="f"></iframe></body></html>', {
+    url: 'https://www.youtube.com/watch?v=A',
+    runScripts: 'outside-only',
+  });
+  t.after(() => outer.window.close());
+  const fw = outer.window.document.querySelector('#f').contentWindow;
+  fw.eval(instrumented);
+  assert.equal(fw.shortsChecks, undefined);
+  outer.window.eval(instrumented);
+  assert.ok(outer.window.shortsChecks > 0);
+});

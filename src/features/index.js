@@ -1,5 +1,6 @@
+import maxQuality from './max-quality/index.js';
 import rightRailComments from './right-rail-comments/index.js';
 import shortsToWatch from './shorts-to-watch/index.js';
 
 // 새 기능은 여기에 한 줄 추가한다. 배열 순서대로 시작된다.
-export default [rightRailComments, shortsToWatch];
+export default [rightRailComments, shortsToWatch, maxQuality];

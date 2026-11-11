@@ -103,6 +103,13 @@
 - 일반 영상·홈·검색 등 쇼츠가 아닌 페이지에서는 이동이 일어나지 않음
 - 모바일 웹(`m.youtube.com`)에서도 위 항목이 동작하고, 오른쪽 댓글 패널(`#tubekit-styles`, `#tubekit-root`)은 생기지 않음
 
+### 최고 화질 자동 선택
+
+- 영상 직접 열기, 관련 영상 클릭, 앞뒤 이동에서 `#movie_player`의 `getPlaybackQuality()`가 `getAvailableQualityData()`의 가장 높은 재생 가능 화질이 됨
+- 재생 중 직접 바꾼 화질이 일시정지·재생 후에도 유지됨
+- 모바일 웹(`m.youtube.com`)과 다른 사이트에 넣은 임베드(`youtube-nocookie.com/embed` iframe)에서도 동작하고, 임베드 iframe 안에는 오른쪽 댓글 패널(`#tubekit-styles`)이 생기지 않음
+- Premium 포맷은 로그인해야 나타나므로 에이전트가 확인하지 못한다. 필요하면 사용자에게 확인을 요청한다
+
 ### 공통
 
 - 콘솔에 스크립트(`tubekit`) 관련 오류가 없음

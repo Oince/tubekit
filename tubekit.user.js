@@ -1,21 +1,92 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.5.0
+// @version      0.6.0
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
 // @updateURL    https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
 // @match        https://www.youtube.com/*
 // @match        https://m.youtube.com/*
+// @match        https://www.youtube-nocookie.com/*
+// @exclude      https://www.youtube.com/live_chat*
 // @grant        window.onurlchange
 // @run-at       document-start
-// @noframes
 // ==/UserScript==
 
 (function() {
 	"use strict";
+	var PLAYER_SELECTOR = "#movie_player";
+	var QUALITY_HEIGHT = {
+		highres: 4320,
+		hd2160: 2160,
+		hd1440: 1440,
+		hd1080: 1080,
+		hd720: 720,
+		large: 480,
+		medium: 360,
+		small: 240,
+		tiny: 144
+	};
+	var applied = new WeakMap();
+	function pickBest(entries) {
+		let best = null;
+		for (const entry of entries) {
+			if (!entry || !entry.isPlayable) continue;
+			const height = QUALITY_HEIGHT[entry.quality];
+			if (!height) continue;
+			const bestHeight = best ? QUALITY_HEIGHT[best.quality] : 0;
+			if (height > bestHeight) best = entry;
+			else if (height === bestHeight && !best.paygatedQualityDetails && entry.paygatedQualityDetails) best = entry;
+		}
+		return best;
+	}
+	function applyMaxQuality(player) {
+		try {
+			if (typeof player.getAvailableQualityData !== "function" || typeof player.setPlaybackQualityRange !== "function") return false;
+			const best = pickBest(player.getAvailableQualityData() || []);
+			if (!best) return false;
+			if (best.paygatedQualityDetails) player.setPlaybackQualityRange(best.quality, best.quality, best.formatId);
+			else player.setPlaybackQualityRange(best.quality, best.quality);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	function handlePlaying(player) {
+		if (player.classList.contains("ad-showing")) return;
+		let id;
+		try {
+			id = player.getVideoData().video_id;
+		} catch {
+			return;
+		}
+		if (!id || id === applied.get(player)) return;
+		if (applyMaxQuality(player)) applied.set(player, id);
+	}
+	function playerOf(event) {
+		const target = event.target;
+		if (!target || target.tagName !== "VIDEO" || typeof target.closest !== "function") return null;
+		return target.closest(PLAYER_SELECTOR);
+	}
+	function start$1() {
+		document.addEventListener("playing", (event) => {
+			const player = playerOf(event);
+			if (player) handlePlaying(player);
+		}, true);
+		const existing = document.querySelector(PLAYER_SELECTOR);
+		if (!existing) return;
+		try {
+			if (existing.getPlayerState() === 1) handlePlaying(existing);
+		} catch {}
+	}
+	var max_quality_default = {
+		id: "max-quality",
+		frames: true,
+		start: start$1
+	};
 	var SCRIPT_ID = "tubekit";
+	var MIN_VIEWPORT_WIDTH = 1e3;
 	var SELECTORS = {
 		watch: "ytd-watch-flexy",
 		primary: "#primary",
@@ -244,7 +315,7 @@
       transform: translateY(0);
     }
 
-    @media (max-width: 999px) {
+    @media (max-width: ${MIN_VIEWPORT_WIDTH - 1}px) {
       #${SCRIPT_ID}-root {
         display: none !important;
       }
@@ -905,9 +976,21 @@
 		window.addEventListener("navigate", rewriteEndpoint, true);
 		window.addEventListener("state-navigateend", redirectIfShorts);
 	}
-	var features_default = [right_rail_comments_default, {
-		id: "shorts-to-watch",
-		start
-	}];
-	for (const feature of features_default) feature.start();
+	var features_default = [
+		right_rail_comments_default,
+		{
+			id: "shorts-to-watch",
+			start
+		},
+		max_quality_default
+	];
+	function inFrame() {
+		try {
+			return window.top !== window;
+		} catch {
+			return true;
+		}
+	}
+	var framed = inFrame();
+	for (const feature of features_default) if (!framed || feature.frames) feature.start();
 })();
