@@ -82,7 +82,7 @@
 - 모바일 화면(`m.youtube.com`)은 Chrome에서는 `emulate`로 모바일 뷰포트와 iPhone User-Agent를 주어 확인하고, Safari에서는 위의 iOS 시뮬레이터로 확인한다.
 - YouTube에 로그인하지 않는다. 로그인해야만 재현되는 문제(댓글 작성 등)는 사용자에게 알리고 직접 확인을 요청한다.
 - 쿠키·동의 팝업이 뜨면 필수가 아닌 항목은 거부한다.
-- 광고가 재생되면 건너뛰기 버튼(`.ytp-skip-ad-button`, `.ytp-ad-skip-button-modern` 등)이 나타나는 즉시 누른다. 재생을 기다리는 스크립트에도 버튼을 찾아 누르는 처리를 넣는다.
+- 광고가 재생되면 건너뛰기 버튼(`.ytp-skip-ad-button`, `.ytp-ad-skip-button-modern` 등)이 나타나는 즉시 누른다. YouTube는 실제 입력이 아닌 클릭을 무시하므로 `evaluate_script` 안의 `element.click()`으로는 넘어가지 않는다. 스냅숏에서 "건너뛰기" 버튼을 찾아 MCP의 클릭 도구(Chrome `click` 등)로 누른다.
 - 작업이 끝나면 에이전트가 연 것은 모두 닫는다: MCP Chrome 브라우저(페이지만 닫지 말고 브라우저를 종료한다. 마지막 페이지는 `close_page`로 닫을 수 없으므로 `--user-data-dir`에 `chrome-devtools-mcp`가 들어간 Chrome 메인 프로세스만 종료하고, 사용자의 Chrome은 건드리지 않는다), Safari MCP로 연 탭, 부팅한 iOS 시뮬레이터(`xcrun simctl shutdown`), 띄운 `safaridriver` 같은 보조 프로세스. 사용자가 원래 열어 둔 Safari 창·탭은 닫지 않는다.
 
 ## 버전과 문서
