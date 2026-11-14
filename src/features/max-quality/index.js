@@ -19,6 +19,8 @@ const applied = new WeakMap();
 const failures = new WeakMap();
 // 복구 재시작 후 playing 때 돌아갈 위치 {id, time}. stopVideo 직후의 seekTo는 무시되므로 다음 playing에서 한다.
 const resume = new WeakMap();
+// error로 복구를 시작한 영상 id. 다음 playing까지 오는 error(같은 실패의 반복, 복구 직후 남은 error)는 무시한다.
+const recovering = new WeakMap();
 
 function pickBest(entries, limit = Infinity) {
   let best = null;
@@ -41,7 +43,7 @@ function applyMaxQuality(player, limit = Infinity, current = null) {
     const best = pickBest(player.getAvailableQualityData() || [], limit);
     if (!best) return false;
     if (best.quality === current) return true;
-    // 복구 경로(current 있음): 폴백 후 화질만 바꾸면 Chrome 플레이어가 오류 화면으로 멈추므로 정지 후 바꾸고 위치로 되돌려 재생한다.
+    // 복구 경로(current 있음): 실패한 상태에서 화질만 바꾸면 Chrome 플레이어가 오류 화면으로 멈추므로 정지 후 바꾸고 위치로 되돌려 재생한다.
     const recover = current !== null && ['getCurrentTime', 'stopVideo', 'playVideo'].every(name => typeof player[name] === 'function');
     const time = recover ? player.getCurrentTime() : 0;
     if (recover) player.stopVideo();
@@ -83,6 +85,7 @@ function handlePlaying(player) {
   if (player.classList.contains('ad-showing')) return;
   const id = videoIdOf(player);
   if (!id) return;
+  recovering.delete(player);
   const pending = resume.get(player);
   if (pending) {
     resume.delete(player);
@@ -96,7 +99,7 @@ function handlePlaying(player) {
     if (applyMaxQuality(player, failedLimit(player, id))) applied.set(player, id);
     return;
   }
-  // 재생에 실패한 화질이 있고 플레이어가 그보다 낮은 화질로 떨어졌으면 한 단계 아래로 다시 맞춘다.
+  // 안전망: 오류 시점 복구 뒤에도 플레이어가 실패한 화질보다 낮은 화질로 떨어졌으면(예: 자체 재시도로 240p) 한 단계 아래로 다시 맞춘다.
   const limit = failedLimit(player, id);
   if (limit === Infinity) return;
   const current = qualityOf(player);
@@ -106,14 +109,25 @@ function handlePlaying(player) {
 }
 
 // 정상적인 화질 변경에서는 error가 나지 않으므로 error를 재생 실패 신호로 쓴다.
+// 플레이어가 스스로 재시도해 240p로 떨어지길 기다리면 수 초가 걸리므로, 첫 error에서 바로 한 단계 아래로 복구한다.
+// 한 번의 실패에도 error가 여러 번 오므로 복구를 시작한 뒤 다음 playing까지의 error는 무시한다.
+// 실패한 화질을 다시 고른 경우에도 이미 재생이 한 번 이어진 뒤이므로 바로 복구된다.
 function handleError(player) {
   if (player.classList.contains('ad-showing')) return;
   const id = videoIdOf(player);
-  const height = QUALITY_HEIGHT[qualityOf(player)];
+  const current = qualityOf(player);
+  const height = QUALITY_HEIGHT[current];
   if (!id || !height) return;
-  const record = failures.get(player);
-  const limit = record && record.id === id ? Math.min(record.limit, height) : height;
+  if (recovering.get(player) === id) return;
+  const limit = Math.min(failedLimit(player, id), height);
   failures.set(player, { id, limit });
+  if (applyMaxQuality(player, limit, current)) recovering.set(player, id);
+}
+
+// 중단(1)·네트워크(2) 오류는 화질 탓이 아니므로 재생 실패로 보지 않는다. 코드가 없으면 실패로 본다.
+function isQualityFailure(video) {
+  const code = video.error && video.error.code;
+  return code !== 1 && code !== 2;
 }
 
 function playerOf(event) {
@@ -131,7 +145,7 @@ function start() {
   // error는 버블링하지 않으므로 캡처 단계에서 받는다.
   document.addEventListener('error', event => {
     const player = playerOf(event);
-    if (player) handleError(player);
+    if (player && isQualityFailure(event.target)) handleError(player);
   }, true);
 
   const existing = document.querySelector(PLAYER_SELECTOR);

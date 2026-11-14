@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.1
+// @version      0.6.2
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -31,6 +31,7 @@
 	var applied = new WeakMap();
 	var failures = new WeakMap();
 	var resume = new WeakMap();
+	var recovering = new WeakMap();
 	function pickBest(entries, limit = Infinity) {
 		let best = null;
 		for (const entry of entries) {
@@ -92,6 +93,7 @@
 		if (player.classList.contains("ad-showing")) return;
 		const id = videoIdOf(player);
 		if (!id) return;
+		recovering.delete(player);
 		const pending = resume.get(player);
 		if (pending) {
 			resume.delete(player);
@@ -113,14 +115,20 @@
 	function handleError(player) {
 		if (player.classList.contains("ad-showing")) return;
 		const id = videoIdOf(player);
-		const height = QUALITY_HEIGHT[qualityOf(player)];
+		const current = qualityOf(player);
+		const height = QUALITY_HEIGHT[current];
 		if (!id || !height) return;
-		const record = failures.get(player);
-		const limit = record && record.id === id ? Math.min(record.limit, height) : height;
+		if (recovering.get(player) === id) return;
+		const limit = Math.min(failedLimit(player, id), height);
 		failures.set(player, {
 			id,
 			limit
 		});
+		if (applyMaxQuality(player, limit, current)) recovering.set(player, id);
+	}
+	function isQualityFailure(video) {
+		const code = video.error && video.error.code;
+		return code !== 1 && code !== 2;
 	}
 	function playerOf(event) {
 		const target = event.target;
@@ -134,7 +142,7 @@
 		}, true);
 		document.addEventListener("error", (event) => {
 			const player = playerOf(event);
-			if (player) handleError(player);
+			if (player && isQualityFailure(event.target)) handleError(player);
 		}, true);
 		const existing = document.querySelector(PLAYER_SELECTOR);
 		if (!existing) return;
