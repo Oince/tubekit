@@ -8,7 +8,22 @@
 - 소스는 `src/`에 기능별 모듈로 두고, Vite + `vite-plugin-monkey`로 저장소 루트의 `tubekit.user.js` 한 파일로 빌드한다. 이 빌드 결과가 배포물이며 git에 함께 커밋한다. `tubekit.user.js`는 직접 고치지 않는다.
 - `test/build.test.cjs`는 커밋된 `tubekit.user.js`가 `src/`의 현재 빌드 결과와 같은지 확인한다. 빌드를 잊으면 `npm test`가 실패한다.
 - jsdom에는 레이아웃 엔진이 없어 화면 배치를 가정하므로 실제 화면 배치·무한 스크롤·댓글 작성·브라우저별 레이아웃 동작은 테스트로 확인할 수 없다. 그래서 아래의 브라우저 검증이 필수다.
-- 사용자는 Safari와 Chrome에서 쓴다. 이 두 브라우저에서 동작하면 된다.
+- 사용자는 Safari와 Chrome에서 쓴다. 이 두 브라우저에서 동작하면 된다. 기기별 환경은 아래 "사용 환경"을 본다.
+
+## 사용 환경
+
+사용자가 쓰는 기기는 아래 4개다. 가장 중요한 것은 모바일 기기 2개(iPhone, iPad)다. 맥북과 Windows PC는 일반 데스크톱 환경이라 데스크톱 Chrome·Safari 검증으로 충분하다.
+
+| 기기 | 화면 | 확인 방법 |
+|---|---|---|
+| iPhone 17 Pro | Safari, 모바일 웹 `m.youtube.com`, 세로 402 CSS px | iOS 시뮬레이터 `iPhone 17 Pro` |
+| iPad Pro 11인치 (M2) | Safari, 데스크톱 화면 `www.youtube.com`, 가로 1194 / 세로 834 CSS px. 단독으로도 쓰고 맥북의 Sidecar 보조 화면으로도 씀 | 데스크톱 Chrome·Safari 화면을 1194px(가로)·834px(세로)로 맞춰 확인 |
+| 맥북 | 데스크톱 Safari·Chrome, `www.youtube.com` | Chrome MCP, Safari MCP (기본 검증) |
+| Windows PC | 데스크톱 브라우저 | 따로 확인하지 않음. 데스크톱 Chrome 결과로 갈음 |
+
+- 모바일 웹이나 터치 동작에 닿는 변경은 iPhone 시뮬레이터 확인을 빠뜨리지 않는다.
+- iPad 가로(1194px)는 댓글 패널 적용 범위(1000px 이상) 안이고 세로(834px)는 밖이다. 화면 너비나 2열 배치에 닿는 변경은 iPad 가로·세로를 모두 확인한다.
+- 사용자는 iPad에서도 데스크톱 화면(`www.youtube.com`)을 쓰므로 iPad용 시뮬레이터는 쓰지 않는다. 터치처럼 데스크톱 브라우저로 재현할 수 없는 iPad 문제는 사용자에게 실제 iPad에서 확인을 요청한다.
 
 ## 소스 구조와 기능 추가
 
@@ -79,7 +94,7 @@
 
 - 적용 조건은 화면 너비 1000 CSS px 이상의 2열 화면이다. 기본 검증 너비는 1440px이며, 경계 문제는 1000px 전후도 확인한다.
 - 다크 모드는 Chrome `emulate`, Safari `set_emulated_media`로 확인한다.
-- 모바일 화면(`m.youtube.com`)은 Chrome에서는 `emulate`로 모바일 뷰포트와 iPhone User-Agent를 주어 확인하고, Safari에서는 위의 iOS 시뮬레이터로 확인한다.
+- 모바일 화면(`m.youtube.com`)은 Chrome에서는 `emulate`로 모바일 뷰포트와 iPhone User-Agent를 주어 확인하고, Safari에서는 위의 iOS 시뮬레이터로 확인한다. 어느 기기를 확인해야 하는지는 "사용 환경"을 따른다.
 - YouTube에 로그인하지 않는다. 로그인해야만 재현되는 문제(댓글 작성 등)는 사용자에게 알리고 직접 확인을 요청한다.
 - 쿠키·동의 팝업이 뜨면 필수가 아닌 항목은 거부한다.
 - 광고가 재생되면 건너뛰기 버튼(`.ytp-skip-ad-button`, `.ytp-ad-skip-button-modern` 등)이 나타나는 즉시 누른다. YouTube는 실제 입력이 아닌 클릭을 무시하므로 `evaluate_script` 안의 `element.click()`으로는 넘어가지 않는다. 스냅숏에서 "건너뛰기" 버튼을 찾아 MCP의 클릭 도구(Chrome `click` 등)로 누른다.
