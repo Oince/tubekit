@@ -293,17 +293,33 @@ test('keyboard arrows wrap and Home/End activate and focus the target tab', asyn
 test('special panels release rail clipping and closing them restores the panel', async t => {
   const { w, document } = await setup(t);
   const secondary = document.querySelector('#secondary');
-  assert.equal(w.getComputedStyle(secondary).overflow, 'hidden');
+  assert.equal(w.getComputedStyle(secondary).overflowY, 'clip');
   const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
   panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
   document.querySelector('#secondary-inner').append(panel);
   await sleep(200);
   assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'true');
-  assert.notEqual(w.getComputedStyle(secondary).overflow, 'hidden');
+  assert.notEqual(w.getComputedStyle(secondary).overflowY, 'clip');
   panel.remove();
   await sleep(200);
   assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
-  assert.equal(w.getComputedStyle(secondary).overflow, 'hidden');
+  assert.equal(w.getComputedStyle(secondary).overflowY, 'clip');
+});
+
+test('panel root gets the pane scrollbar width as a CSS variable', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  let offset = 335;
+  const proto = w.HTMLElement.prototype;
+  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? offset : 0; } });
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
+  w.dispatchEvent(new w.Event('resize'));
+  await sleep(300);
+  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '15px');
+  offset = 320;
+  document.querySelector('#tubekit-related-tab').click();
+  await sleep(100);
+  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '0px');
 });
 
 test('selected tab survives leaving and re-entering the layout on the same video', async t => {

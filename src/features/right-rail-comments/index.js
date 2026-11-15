@@ -232,6 +232,14 @@ function saveActiveScrollTop() {
   if (pane) state.scrollTop[state.activeTab] = pane.scrollTop;
 }
 
+function syncScrollbarWidth() {
+  const pane = state.activeTab === 'comments' ? state.commentsPane : state.relatedPane;
+  if (!state.root || !pane || pane.offsetWidth === 0) return;
+  const width = `${Math.max(0, pane.offsetWidth - pane.clientWidth)}px`;
+  if (state.root.style.getPropertyValue(`--${SCRIPT_ID}-scrollbar-width`) === width) return;
+  state.root.style.setProperty(`--${SCRIPT_ID}-scrollbar-width`, width);
+}
+
 function switchTab(tabName, options = {}) {
   if (!state.root || !['comments', 'related'].includes(tabName)) return;
 
@@ -254,6 +262,7 @@ function switchTab(tabName, options = {}) {
     if (generation !== state.generation || !activePane?.isConnected || state.activeTab !== tabName) return;
     activePane.scrollTop = options.reset ? 0 : state.scrollTop[tabName];
     activePane.dispatchEvent(new Event('scroll'));
+    syncScrollbarWidth();
   });
 }
 
@@ -633,6 +642,7 @@ function evaluate() {
     syncReplacedComments();
     syncReplacedRelated();
     syncSpecialPanel();
+    syncScrollbarWidth();
   }
 }
 

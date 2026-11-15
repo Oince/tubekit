@@ -13,7 +13,9 @@ export function addStyles() {
       height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
-      overflow: hidden !important;
+      padding-top: 0 !important;
+      overflow-x: visible !important;
+      overflow-y: clip !important;
     }
 
     html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner {
@@ -22,7 +24,8 @@ export function addStyles() {
       height: 100% !important;
       max-height: 100% !important;
       min-height: 0 !important;
-      overflow: hidden !important;
+      overflow-x: visible !important;
+      overflow-y: clip !important;
     }
 
     html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner > #related,
@@ -44,11 +47,10 @@ export function addStyles() {
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 180px;
+      margin-right: calc(-1 * var(--${SCRIPT_ID}-scrollbar-width, 0px));
       overflow: hidden;
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-bg);
-      border: 1px solid var(--${SCRIPT_ID}-outline);
-      border-radius: 12px;
     }
 
     html[dark] #${SCRIPT_ID}-root {
@@ -74,7 +76,8 @@ export function addStyles() {
       grid-template-columns: 1fr 1fr;
       flex: 0 0 auto;
       gap: 4px;
-      padding: 8px;
+      padding: 0 0 8px;
+      margin-right: var(--${SCRIPT_ID}-scrollbar-width, 0px);
       background: var(--${SCRIPT_ID}-bg);
       border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
     }
@@ -161,7 +164,7 @@ export function addStyles() {
       width: 100% !important;
       max-width: none !important;
       margin: 0 !important;
-      padding: 8px 12px 24px !important;
+      padding: 8px 0 24px !important;
     }
 
     #${SCRIPT_ID}-related-pane > #related,
@@ -171,7 +174,7 @@ export function addStyles() {
       width: 100% !important;
       max-width: none !important;
       margin: 0 !important;
-      padding: 8px 12px 24px !important;
+      padding: 8px 0 24px !important;
     }
 
     .${SCRIPT_ID}-status {
@@ -201,7 +204,7 @@ export function addStyles() {
     #${SCRIPT_ID}-toast {
       position: absolute;
       z-index: 5;
-      right: 12px;
+      right: calc(12px + var(--${SCRIPT_ID}-scrollbar-width, 0px));
       bottom: 12px;
       left: 12px;
       box-sizing: border-box;

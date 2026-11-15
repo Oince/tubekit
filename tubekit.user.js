@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.2
+// @version      0.6.3
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -177,7 +177,9 @@
       height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
-      overflow: hidden !important;
+      padding-top: 0 !important;
+      overflow-x: visible !important;
+      overflow-y: clip !important;
     }
 
     html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner {
@@ -186,7 +188,8 @@
       height: 100% !important;
       max-height: 100% !important;
       min-height: 0 !important;
-      overflow: hidden !important;
+      overflow-x: visible !important;
+      overflow-y: clip !important;
     }
 
     html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner > #related,
@@ -208,11 +211,10 @@
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 180px;
+      margin-right: calc(-1 * var(--${SCRIPT_ID}-scrollbar-width, 0px));
       overflow: hidden;
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-bg);
-      border: 1px solid var(--${SCRIPT_ID}-outline);
-      border-radius: 12px;
     }
 
     html[dark] #${SCRIPT_ID}-root {
@@ -238,7 +240,8 @@
       grid-template-columns: 1fr 1fr;
       flex: 0 0 auto;
       gap: 4px;
-      padding: 8px;
+      padding: 0 0 8px;
+      margin-right: var(--${SCRIPT_ID}-scrollbar-width, 0px);
       background: var(--${SCRIPT_ID}-bg);
       border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
     }
@@ -325,7 +328,7 @@
       width: 100% !important;
       max-width: none !important;
       margin: 0 !important;
-      padding: 8px 12px 24px !important;
+      padding: 8px 0 24px !important;
     }
 
     #${SCRIPT_ID}-related-pane > #related,
@@ -335,7 +338,7 @@
       width: 100% !important;
       max-width: none !important;
       margin: 0 !important;
-      padding: 8px 12px 24px !important;
+      padding: 8px 0 24px !important;
     }
 
     .${SCRIPT_ID}-status {
@@ -365,7 +368,7 @@
     #${SCRIPT_ID}-toast {
       position: absolute;
       z-index: 5;
-      right: 12px;
+      right: calc(12px + var(--${SCRIPT_ID}-scrollbar-width, 0px));
       bottom: 12px;
       left: 12px;
       box-sizing: border-box;
@@ -587,6 +590,13 @@
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (pane) state.scrollTop[state.activeTab] = pane.scrollTop;
 	}
+	function syncScrollbarWidth() {
+		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
+		if (!state.root || !pane || pane.offsetWidth === 0) return;
+		const width = `${Math.max(0, pane.offsetWidth - pane.clientWidth)}px`;
+		if (state.root.style.getPropertyValue(`--tubekit-scrollbar-width`) === width) return;
+		state.root.style.setProperty(`--${SCRIPT_ID}-scrollbar-width`, width);
+	}
 	function switchTab(tabName, options = {}) {
 		if (!state.root || !["comments", "related"].includes(tabName)) return;
 		if (!options.keepSaved) saveActiveScrollTop();
@@ -605,6 +615,7 @@
 			if (generation !== state.generation || !activePane?.isConnected || state.activeTab !== tabName) return;
 			activePane.scrollTop = options.reset ? 0 : state.scrollTop[tabName];
 			activePane.dispatchEvent(new Event("scroll"));
+			syncScrollbarWidth();
 		});
 	}
 	function showToast(message) {
@@ -917,6 +928,7 @@
 			syncReplacedComments();
 			syncReplacedRelated();
 			syncSpecialPanel();
+			syncScrollbarWidth();
 		}
 	}
 	function isInsideAdoptedContent(node) {
