@@ -5,15 +5,8 @@
       "command": "npx",
       "args": [
         "-y",
-        "chrome-devtools-mcp@latest"
-      ],
-      "env": {}
-    },
-    "safari-mcp": {
-      "type": "stdio",
-      "command": "/usr/bin/safaridriver",
-      "args": [
-        "--mcp"
+        "chrome-devtools-mcp@latest",
+        "--chrome-arg=--mute-audio"
       ],
       "env": {}
     }

@@ -8,22 +8,21 @@
 - 소스는 `src/`에 기능별 모듈로 두고, Vite + `vite-plugin-monkey`로 저장소 루트의 `tubekit.user.js` 한 파일로 빌드한다. 이 빌드 결과가 배포물이며 git에 함께 커밋한다. `tubekit.user.js`는 직접 고치지 않는다.
 - `test/build.test.cjs`는 커밋된 `tubekit.user.js`가 `src/`의 현재 빌드 결과와 같은지 확인한다. 빌드를 잊으면 `npm test`가 실패한다.
 - jsdom에는 레이아웃 엔진이 없어 화면 배치를 가정하므로 실제 화면 배치·무한 스크롤·댓글 작성·브라우저별 레이아웃 동작은 테스트로 확인할 수 없다. 그래서 아래의 브라우저 검증이 필수다.
-- 사용자는 Safari와 Chrome에서 쓴다. 이 두 브라우저에서 동작하면 된다. 기기별 환경은 아래 "사용 환경"을 본다.
+- 브라우저 재현과 검증은 `chrome-devtools` MCP(Chrome)로 한다. 기기별 환경은 아래 "사용 환경"을 본다.
 
 ## 사용 환경
 
-사용자가 쓰는 기기는 아래 4개다. 가장 중요한 것은 모바일 기기 2개(iPhone, iPad)다. 맥북과 Windows PC는 일반 데스크톱 환경이라 데스크톱 Chrome·Safari 검증으로 충분하다.
+사용자가 쓰는 기기는 아래 4개다. 모든 기기를 Chrome MCP의 화면 크기·User-Agent 설정으로 갈음해 확인한다.
 
 | 기기 | 화면 | 확인 방법 |
 |---|---|---|
-| iPhone 17 Pro | Safari, 모바일 웹 `m.youtube.com`, 세로 402 CSS px | iOS 시뮬레이터 `iPhone 17 Pro` |
-| iPad Pro 11인치 (M2) | Safari, 데스크톱 화면 `www.youtube.com`, 가로 1194 / 세로 834 CSS px. 단독으로도 쓰고 맥북의 Sidecar 보조 화면으로도 씀 | 데스크톱 Chrome·Safari 화면을 1194px(가로)·834px(세로)로 맞춰 확인 |
-| 맥북 | 데스크톱 Safari·Chrome, `www.youtube.com` | Chrome MCP, Safari MCP (기본 검증) |
+| iPhone 17 Pro | 모바일 웹 `m.youtube.com`, 세로 402 CSS px | Chrome `emulate`로 402px 모바일 뷰포트(터치)와 iPhone User-Agent를 주고 `m.youtube.com`을 연다 |
+| iPad Pro 11인치 (M2) | 데스크톱 화면 `www.youtube.com`, 가로 1194 / 세로 834 CSS px | Chrome 화면을 1194px(가로)·834px(세로)로 맞춰 확인 |
+| 맥북 | 데스크톱 화면 `www.youtube.com` | Chrome MCP (기본 검증) |
 | Windows PC | 데스크톱 브라우저 | 따로 확인하지 않음. 데스크톱 Chrome 결과로 갈음 |
 
-- 모바일 웹이나 터치 동작에 닿는 변경은 iPhone 시뮬레이터 확인을 빠뜨리지 않는다.
+- 모바일 웹이나 터치 동작에 닿는 변경은 iPhone 모바일 뷰 확인을 빠뜨리지 않는다.
 - iPad 가로(1194px)는 댓글 패널 적용 범위(1000px 이상) 안이고 세로(834px)는 밖이다. 화면 너비나 2열 배치에 닿는 변경은 iPad 가로·세로를 모두 확인한다.
-- 사용자는 iPad에서도 데스크톱 화면(`www.youtube.com`)을 쓰므로 iPad용 시뮬레이터는 쓰지 않는다. 터치처럼 데스크톱 브라우저로 재현할 수 없는 iPad 문제는 사용자에게 실제 iPad에서 확인을 요청한다.
 
 ## 소스 구조와 기능 추가
 
@@ -41,13 +40,12 @@
 
 버그 수정이든 기능 변경이든 아래 순서를 지킨다. 단계를 건너뛰지 않는다.
 
-### 1. 재현 (Chrome·Safari 모두)
+### 1. 재현
 
-- `chrome-devtools` MCP와 `safari-mcp` MCP로 **두 브라우저 모두에서** 문제를 재현한다.
+- `chrome-devtools` MCP로 문제를 재현한다. 문제가 생긴 기기에 맞춰 화면 크기와 User-Agent를 설정한다("사용 환경" 참고).
 - 재현 결과를 기록한다: 영상 주소, 화면 너비, 진입 경로(직접 열기/관련 영상 클릭/앞뒤 이동), 라이트·다크 모드, 스크린샷, 콘솔 오류, 필요하면 DOM 상태(`evaluate_script` 결과).
-- 한쪽 브라우저에서만 재현되면 그 사실 자체를 기록한다. 브라우저별 차이가 원인 분석의 단서다.
-- 두 브라우저 모두에서 재현되지 않으면 수정에 들어가지 말고, 시도한 조건과 결과를 사용자에게 보고한 뒤 추가 정보를 요청한다.
-- 새 기능처럼 재현할 문제가 없는 작업은, 이 단계에서 수정 전 현재 동작을 두 브라우저에서 확인하고 기록한다.
+- Chrome에서 재현되지 않으면 수정에 들어가지 말고, 시도한 조건과 결과를 사용자에게 보고한 뒤 추가 정보를 요청한다.
+- 새 기능처럼 재현할 문제가 없는 작업은, 이 단계에서 수정 전 현재 동작을 Chrome에서 확인하고 기록한다.
 
 ### 2. 수정
 
@@ -55,50 +53,42 @@
 - 가능하면 재현된 문제를 `test/regression.test.cjs`에 회귀 테스트로 추가한다. jsdom으로 표현할 수 없는 레이아웃 문제는 테스트 대신 3단계 브라우저 검증으로 보장한다.
 - `src/`를 고친 뒤 `npm run build`로 `tubekit.user.js`를 다시 만들고, `npm test`가 통과해야 다음 단계로 넘어간다.
 
-### 3. 검증 (Chrome·Safari 모두)
+### 3. 검증
 
-- 수정한 스크립트를 다시 두 브라우저에 주입해 **1단계와 같은 조건과 절차로** 문제가 사라졌는지 MCP로 확인한다.
+- 수정한 스크립트를 다시 Chrome에 주입해 **1단계와 같은 조건과 절차로** 문제가 사라졌는지 MCP로 확인한다.
 - 수정 대상 외의 기본 동작이 깨지지 않았는지도 함께 확인한다.
-- 검증 결과(브라우저별 성공/실패, 스크린샷, 콘솔 오류 유무)를 사용자에게 보고한다. 한쪽에서라도 실패하면 완료로 보고하지 않고 2단계로 돌아간다.
-- MCP를 쓸 수 없어 검증하지 못한 브라우저가 있으면 "검증하지 못함"이라고 명시한다. 테스트 통과만으로 검증을 대신하지 않는다.
+- 검증 결과(확인한 화면 크기·User-Agent별 성공/실패, 스크린샷, 콘솔 오류 유무)를 사용자에게 보고한다. 하나라도 실패하면 완료로 보고하지 않고 2단계로 돌아간다.
+- MCP를 쓸 수 없어 검증하지 못했으면 "검증하지 못함"이라고 명시한다. 테스트 통과만으로 검증을 대신하지 않는다.
 
-## 브라우저에서 스크립트 실행하기
+## 브라우저 검증 방법
 
-사용자의 PC에는 AdGuard에 이 스크립트의 GitHub 배포본이 설치되어 있다. AdGuard 설치본은 실사용용 배포본으로 둔다. 개발 중인 코드는 `npm run build`로 만든 `tubekit.user.js`를 MCP로 직접 주입한다. `src/`의 개별 모듈은 주입하지 않는다.
+### 브라우저
 
-빌드 결과는 IIFE이고 `GM_*` API를 쓰지 않으므로 주입하면 그대로 실행된다. 어느 브라우저든 같은 페이지에 두 벌이 실행되지 않게 한다(이벤트 리스너와 옵저버가 중복 등록됨). 주입 전에 `#tubekit-styles`가 이미 있는지 확인한다.
+- `chrome-devtools` MCP가 띄우는 Chrome은 확장이 없는 별도 프로필이라 AdGuard 설치본(실사용용 GitHub 배포본)이 적용되지 않는다. AdGuard 설정은 건드리지 않는다.
 
-### Chrome (`chrome-devtools`)
+### 스크립트 주입
 
-- MCP Chrome은 확장이 없는 별도 프로필이라 AdGuard 설치본이 적용되지 않는다. 항상 직접 주입한다.
+- `npm run build`로 만든 `tubekit.user.js`를 `evaluate_script`로 주입한다. `src/`의 개별 모듈은 주입하지 않는다.
+- 빌드 결과는 IIFE이고 `GM_*` API를 쓰지 않으므로 주입하면 그대로 실행된다.
+- 같은 페이지에 두 벌이 실행되지 않게 한다(이벤트 리스너와 옵저버가 중복 등록됨). 주입 전에 `#tubekit-styles`가 이미 있는지 확인한다.
 
-### Safari (`safari-mcp`)
+### 화면 설정
 
-- AdGuard 앱이 네트워크 단계에서 Safari의 YouTube HTML에 배포본을 끼워 넣는다. 따라서 평소 주소로 열면 배포본이 `document-start`에 실행된 상태다. 배포본의 문제를 재현할 때는 이렇게 연다.
-- AdGuard 사용자 규칙에 `@@||www.youtube.com/*tubekit-dev$extension="Tubekit"`가 있어, 주소에 `tubekit-dev`가 들어가면 이 스크립트만 끼워 넣지 않는다. 수정본을 확인할 때는 `https://www.youtube.com/watch?v=...&tubekit-dev=1`로 연 뒤 `#tubekit-styles`가 없는 것을 확인하고 `evaluate_javascript`로 파일 내용을 주입한다. AdGuard 설정은 끄거나 바꾸지 않는다.
-- YouTube가 로드 후 주소에서 `tubekit-dev`를 지우므로, 새로고침이나 주소 이동으로 페이지를 다시 불러올 때는 항상 `tubekit-dev`를 붙인 주소로 연다. YouTube 내부 이동(SPA)에서는 주입한 수정본이 유지된다.
-- `#tubekit-styles`가 있으면 배포본이 들어온 것이므로 주입하지 않는다. 규칙이 없어졌을 수 있으니 사용자에게 알린다.
-- Safari MCP에는 페이지 스크립트보다 먼저 실행하는 기능이 없고, 페이지에서 로컬 서버의 파일을 불러올 수도 없다. 따라서 수정본은 파일 내용을 그대로 넘겨 로드 후에 실행한다. 로드 시점에 관련된 문제라면 그 차이를 보고에 적는다.
+- 댓글 패널 적용 조건은 화면 너비 1000 CSS px 이상의 2열 화면이다. 기본 검증 너비는 1440px이며, 경계 문제는 1000px 전후도 확인한다.
+- 다크 모드는 `emulate`로 확인한다.
+- 모바일 화면(`m.youtube.com`)은 `emulate`로 모바일 뷰포트(터치 포함)와 iPhone User-Agent를 주어 확인한다. User-Agent를 바꾼 뒤에는 페이지를 다시 불러와 YouTube가 모바일 페이지를 내려주게 한다.
+- 어느 기기를 확인해야 하는지는 "사용 환경"을 따른다.
 
-### iOS 시뮬레이터 Safari (모바일 웹)
+### 페이지 조작
 
-- 모바일 웹(`m.youtube.com`)의 Safari 동작은 iOS 시뮬레이터 **iPhone 17 Pro**로 확인한다. 시뮬레이터에는 AdGuard가 없으므로 배포본이 끼어들지 않는다.
-- 시뮬레이터 Safari 설정에는 `원격 자동화`가 없어 `safaridriver`를 쓸 수 없다. 대신 `tools/sim-inspect.py`가 시뮬레이터의 웹 인스펙터 소켓(`com.apple.webinspectord_sim.socket`)에 붙어 열린 탭에서 JavaScript를 실행한다. 이 소켓 연결은 명령 샌드박스 밖에서 실행해야 한다.
-  - `python3 tools/sim-inspect.py pages`: 열린 탭 목록
-  - `python3 tools/sim-inspect.py evalfile --match <주소 일부> tubekit.user.js`: 빌드본 주입(로드 후 실행)
-  - `python3 tools/sim-inspect.py eval --match <주소 일부> '<식>'`: 상태 확인
-- 페이지 이동은 `xcrun simctl openurl booted <주소>`로 하되 새 탭이 열릴 수 있으므로 `--match`로 탭을 정확히 고른다. 탭·뒤로 가기는 시뮬레이터 패널(`tap`)로 실제 터치를 보낸다. 페이지 CSS 좌표에 상태 표시줄 높이(약 62pt)를 더하면 기기 좌표가 된다.
-- 이 클라이언트는 콘솔 메시지를 모으지 않는다. 콘솔 오류를 확인해야 하면 Chrome 결과로 보완하고 그 사실을 보고에 적는다.
-
-### 공통
-
-- 적용 조건은 화면 너비 1000 CSS px 이상의 2열 화면이다. 기본 검증 너비는 1440px이며, 경계 문제는 1000px 전후도 확인한다.
-- 다크 모드는 Chrome `emulate`, Safari `set_emulated_media`로 확인한다.
-- 모바일 화면(`m.youtube.com`)은 Chrome에서는 `emulate`로 모바일 뷰포트와 iPhone User-Agent를 주어 확인하고, Safari에서는 위의 iOS 시뮬레이터로 확인한다. 어느 기기를 확인해야 하는지는 "사용 환경"을 따른다.
 - YouTube에 로그인하지 않는다. 로그인해야만 재현되는 문제(댓글 작성 등)는 사용자에게 알리고 직접 확인을 요청한다.
 - 쿠키·동의 팝업이 뜨면 필수가 아닌 항목은 거부한다.
-- 광고가 재생되면 건너뛰기 버튼(`.ytp-skip-ad-button`, `.ytp-ad-skip-button-modern` 등)이 나타나는 즉시 누른다. YouTube는 실제 입력이 아닌 클릭을 무시하므로 `evaluate_script` 안의 `element.click()`으로는 넘어가지 않는다. 스냅숏에서 "건너뛰기" 버튼을 찾아 MCP의 클릭 도구(Chrome `click` 등)로 누른다.
-- 작업이 끝나면 에이전트가 연 것은 모두 닫는다: MCP Chrome 브라우저(페이지만 닫지 말고 브라우저를 종료한다. 마지막 페이지는 `close_page`로 닫을 수 없으므로 `--user-data-dir`에 `chrome-devtools-mcp`가 들어간 Chrome 메인 프로세스만 종료하고, 사용자의 Chrome은 건드리지 않는다), Safari MCP로 연 탭, 부팅한 iOS 시뮬레이터(`xcrun simctl shutdown`), 띄운 `safaridriver` 같은 보조 프로세스. 사용자가 원래 열어 둔 Safari 창·탭은 닫지 않는다.
+- 광고가 재생되면 건너뛰기 버튼(`.ytp-skip-ad-button`, `.ytp-ad-skip-button-modern` 등)이 나타나는 즉시 누른다. YouTube는 실제 입력이 아닌 클릭을 무시하므로 `evaluate_script` 안의 `element.click()`으로는 넘어가지 않는다. 스냅숏에서 "건너뛰기" 버튼을 찾아 MCP의 `click` 도구로 누른다.
+
+### 작업 후 정리
+
+- 작업이 끝나면 에이전트가 연 것은 모두 닫는다. MCP Chrome은 페이지만 닫지 말고 브라우저를 종료한다. 마지막 페이지는 `close_page`로 닫을 수 없으므로 `--user-data-dir`에 `chrome-devtools-mcp`가 들어간 Chrome 메인 프로세스만 종료하고, 사용자의 Chrome은 건드리지 않는다.
+- 그 밖에 띄운 보조 프로세스도 종료한다.
 
 ## 버전과 문서
 
@@ -111,6 +101,7 @@
 PR은 쓰지 않는다. 작업마다 브랜치를 만들고, 끝나면 로컬에서 `main`에 병합한 뒤 푸시한다.
 
 - 작업을 시작할 때 `main`에서 브랜치를 만든다. 이름은 `<종류>/<짧은-영어-설명>`이고, 종류는 `feat`, `fix`, `refactor`, `docs`, `chore` 중 하나다.
+- 기능 작업에 이어서 하는 문서 작업(README, CHANGELOG, AGENTS.md 등)은 새 브랜치를 만들지 않고 그 기능 작업 브랜치에서 함께 한다.
 - 병합 전에 브랜치에서 `npm test`가 통과하는지 확인한다.
 - 작업이 끝나면 `main`에서 스쿼시 병합해 작업 하나를 커밋 하나로 남기고, 병합한 브랜치는 지운다(`git branch -D`).
 - 브랜치 안의 커밋은 작업 단위로 알아서 한다. 병합과 푸시는 사용자가 요청할 때만 한다.
