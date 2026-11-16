@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.4
+// @version      0.6.5
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -87,7 +87,7 @@
 		start: start$1
 	};
 	var SCRIPT_ID = "tubekit";
-	var MIN_VIEWPORT_WIDTH = 1e3;
+	var MIN_VIEWPORT_WIDTH = 1015;
 	var SELECTORS = {
 		watch: "ytd-watch-flexy",
 		primary: "#primary",
@@ -401,7 +401,7 @@
 		return Boolean(document.fullscreenElement || watch?.hasAttribute("theater") || watch?.hasAttribute("fullscreen") || watch?.hasAttribute("full-bleed-player") || watch?.hasAttribute("miniplayer") || document.querySelector("ytd-miniplayer[active]"));
 	}
 	function isTwoColumnLayout(watch) {
-		if (!watch || innerWidth < 1e3) return false;
+		if (!watch || innerWidth < 1015) return false;
 		const primary = watch.querySelector(SELECTORS.primary);
 		const secondary = watch.querySelector(SELECTORS.secondary);
 		if (!primary || !secondary) return false;

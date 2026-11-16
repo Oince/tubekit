@@ -80,8 +80,17 @@ test('iPad Pro 11-inch Sidecar landscape creates the panel at 1194px', async t =
   assert.ok(document.querySelector('#tubekit-root'));
 });
 
-test('viewport below 1000px does not create the panel', async t => {
-  const { document } = await setup(t, { innerWidth: 999, expectRoot: false });
+test('two-column threshold of 1015px creates the panel', async t => {
+  const { document } = await setup(t, {
+    innerWidth: 1015,
+    primary: { width: 656, left: 16, right: 672 },
+    secondary: { width: 336, left: 672, right: 1008 },
+  });
+  assert.ok(document.querySelector('#tubekit-root'));
+});
+
+test('viewport below 1015px does not create the panel', async t => {
+  const { document } = await setup(t, { innerWidth: 1014, expectRoot: false });
   assert.equal(document.querySelector('#tubekit-root'), null);
 });
 
