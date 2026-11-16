@@ -752,16 +752,8 @@ function qualityPage(t, {
   w.calls = [];
   if (withPlayer) {
     player.getAvailableQualityData = () => data;
-    player.setPlaybackQualityRange = (...args) => { w.calls.push(args); w.order && w.order.push('set'); };
+    player.setPlaybackQualityRange = (...args) => { w.calls.push(args); };
     player.getPlayerState = () => state;
-    w.quality = 'hd720';
-    w.order = [];
-    w.time = 42;
-    player.getCurrentTime = () => w.time;
-    player.stopVideo = () => w.order.push('stop');
-    player.seekTo = (...a) => w.order.push(['seek', ...a]);
-    player.playVideo = () => w.order.push('play');
-    player.getPlaybackQuality = () => w.quality;
     w.videoId = videoId;
     player.getVideoData = () => ({ video_id: w.videoId });
   }
@@ -864,240 +856,27 @@ test('max-quality: missing player API or empty data stays quiet', t => {
   assert.equal(b.w.calls.length, 0);
 });
 
+// 8K(highres)는 버퍼링이 심해 자동 선택 후보에서 제외되므로 첫 자동 선택은 hd2160이다.
 const HIGH_DATA = [
   { quality: 'highres', isPlayable: true, formatId: { itag: 1 } },
   { quality: 'hd2160', isPlayable: true, formatId: { itag: 2 } },
   { quality: 'hd1440', isPlayable: true },
+  { quality: 'hd1080', isPlayable: true },
   { quality: 'small', isPlayable: true },
 ];
 
-function failAt(w, fire, quality, el) {
-  w.quality = quality;
-  fire('error', el);
-}
-
-test('max-quality: playback failure recovers one step below the failed quality at the first error, step by step', t => {
+test('max-quality: 8K (highres) is never auto-selected; 4K is the cap', t => {
   const { w, fire } = qualityPage(t, { data: HIGH_DATA });
   fire('playing');
-  assert.deepEqual(w.calls, [['highres', 'highres']]);
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.calls[1], ['hd2160', 'hd2160']);
-  w.quality = 'hd2160';
+  assert.deepEqual(w.calls, [['hd2160', 'hd2160']]);
+});
+
+test('max-quality: a manually chosen 8K is not overridden on the same video', t => {
+  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
+  fire('playing');
   fire('emptied');
   fire('playing');
-  failAt(w, fire, 'hd2160');
-  assert.deepEqual(w.calls[2], ['hd1440', 'hd1440']);
-  assert.equal(w.calls.length, 3);
-});
-
-test('max-quality: the first error stops, sets the lower quality and plays at once; the position is restored on the next playing only', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  assert.deepEqual(w.order, ['set']);
-  w.time = 77;
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.order, ['set', 'stop', 'set', 'play']);
-  assert.deepEqual(w.calls[1], ['hd2160', 'hd2160']);
-  w.time = 0;
-  w.quality = 'hd2160';
-  fire('playing');
-  assert.deepEqual(w.order, ['set', 'stop', 'set', 'play', ['seek', 77, true]]);
-  fire('playing');
-  assert.equal(w.order.length, 5);
-});
-
-test('max-quality: repeated errors at the same quality do not recover again', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  const order = w.order.slice();
-  failAt(w, fire, 'highres');
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.order, order);
-  assert.equal(w.calls.length, 2);
-});
-
-test('max-quality: an error left over from the failed quality before the next playing is ignored', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  const order = w.order.slice();
-  // 복구 직후 플레이어가 이미 hd2160을 보고하는 상태에서 남은 error가 와도 한 단계 더 내리지 않는다.
-  failAt(w, fire, 'hd2160');
-  assert.deepEqual(w.order, order);
-  assert.equal(w.calls.length, 2);
-  w.quality = 'hd2160';
-  fire('playing');
-  assert.equal(w.calls.length, 2);
-});
-
-test('max-quality: choosing the failed quality again recovers at its first error', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  w.quality = 'hd2160';
-  fire('playing');
-  assert.equal(w.calls.length, 2);
-  w.time = 120;
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.calls[2], ['hd2160', 'hd2160']);
-  assert.deepEqual(w.order.slice(-3), ['stop', 'set', 'play']);
-});
-
-test('max-quality: aborted and network media errors are not treated as quality failures', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  const video = w.document.querySelector('video');
-  for (const code of [1, 2]) {
-    Object.defineProperty(video, 'error', { value: { code }, configurable: true });
-    failAt(w, fire, 'highres');
-  }
-  assert.equal(w.calls.length, 1);
-  assert.deepEqual(w.order, ['set']);
-  Object.defineProperty(video, 'error', { value: { code: 3 }, configurable: true });
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.calls[1], ['hd2160', 'hd2160']);
-});
-
-test('max-quality: an error at the recovered quality steps down once more', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  w.quality = 'hd2160';
-  fire('playing');
-  assert.equal(w.calls.length, 2);
-  w.time = 90;
-  failAt(w, fire, 'hd2160');
-  assert.deepEqual(w.calls[2], ['hd1440', 'hd1440']);
-  assert.deepEqual(w.order.slice(-3), ['stop', 'set', 'play']);
-  w.time = 0;
-  w.quality = 'hd1440';
-  fire('playing');
-  assert.deepEqual(w.order.slice(-1), [['seek', 90, true]]);
-  assert.equal(w.calls.length, 3);
-});
-
-test('max-quality: no recovery when playing already is at the quality below the failed one', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  assert.equal(w.calls.length, 2);
-  w.quality = 'hd2160';
-  fire('playing');
-  fire('playing');
-  assert.equal(w.calls.length, 2);
-});
-
-test('max-quality: the playing safety net steps back up when the player drops to small after the error-time recovery', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  assert.equal(w.calls.length, 2);
-  w.quality = 'small';
-  fire('playing');
-  assert.deepEqual(w.calls[2], ['hd2160', 'hd2160']);
-  assert.equal(w.calls.length, 3);
-  w.quality = 'hd2160';
-  fire('playing');
-  assert.equal(w.calls.length, 3);
-});
-
-test('max-quality: manual quality change without an error is not overridden', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  w.quality = 'small';
-  fire('emptied');
-  fire('playing');
-  assert.equal(w.calls.length, 1);
-});
-
-test('max-quality: an error with no quality below it does nothing', t => {
-  const { w, fire } = qualityPage(t, { data: [{ quality: 'highres', isPlayable: true }] });
-  fire('playing');
-  const order = w.order.slice();
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.order, order);
-  assert.equal(w.calls.length, 1);
-});
-
-test('max-quality: manual selection that fails is also stepped down', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  w.quality = 'hd1440';
-  fire('playing');
-  assert.deepEqual(w.calls[0], ['highres', 'highres']);
-  w.quality = 'hd2160';
-  fire('error');
-  assert.deepEqual(w.calls[1], ['hd1440', 'hd1440']);
-  assert.deepEqual(w.order, ['set', 'stop', 'set', 'play']);
-});
-
-test('max-quality: errors during ads or with unknown quality are ignored', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  const player = w.document.querySelector('#movie_player');
-  fire('playing');
-  player.classList.add('ad-showing');
-  failAt(w, fire, 'highres');
-  player.classList.remove('ad-showing');
-  failAt(w, fire, 'unknown');
-  assert.equal(w.calls.length, 1);
-  assert.deepEqual(w.order, ['set']);
-  w.quality = 'small';
-  fire('playing');
-  assert.equal(w.calls.length, 1);
-});
-
-test('max-quality: an error without a video id is ignored', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  w.videoId = undefined;
-  failAt(w, fire, 'highres');
-  assert.equal(w.calls.length, 1);
-});
-
-test('max-quality: failure record resets on a new video id', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.calls[1], ['hd2160', 'hd2160']);
-  w.videoId = 'v2';
-  w.quality = 'small';
-  fire('playing');
-  assert.deepEqual(w.calls[2], ['highres', 'highres']);
-  // 새 영상에서는 같은 높이의 error도 다시 복구한다.
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.calls[3], ['hd2160', 'hd2160']);
-});
-
-test('max-quality: events from a replaced video element are handled', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  fire('playing');
-  const fresh = w.document.createElement('video');
-  w.document.querySelector('#movie_player').appendChild(fresh);
-  failAt(w, fire, 'highres', fresh);
-  assert.deepEqual(w.calls[1], ['hd2160', 'hd2160']);
-});
-
-test('max-quality: no position is restored near the start or when already close', t => {
-  for (const [start, after] of [[1, 0], [42, 41.5]]) {
-    const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-    fire('playing');
-    w.time = start;
-    failAt(w, fire, 'highres');
-    w.time = after;
-    w.quality = 'hd2160';
-    fire('playing');
-    assert.deepEqual(w.order, ['set', 'stop', 'set', 'play']);
-  }
-});
-
-test('max-quality: recovery without stop/seek/play API only sets the quality', t => {
-  const { w, fire } = qualityPage(t, { data: HIGH_DATA });
-  const player = w.document.querySelector('#movie_player');
-  player.stopVideo = undefined;
-  fire('playing');
-  failAt(w, fire, 'highres');
-  assert.deepEqual(w.order, ['set', 'set']);
-  assert.deepEqual(w.calls[1], ['hd2160', 'hd2160']);
+  assert.deepEqual(w.calls, [['hd2160', 'hd2160']]);
 });
 
 test('frames: inside an iframe only frames:true features run', async t => {

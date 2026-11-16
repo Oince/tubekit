@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.3
+// @version      0.6.4
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -28,107 +28,42 @@
 		small: 240,
 		tiny: 144
 	};
+	var MAX_HEIGHT = 2160;
 	var applied = new WeakMap();
-	var failures = new WeakMap();
-	var resume = new WeakMap();
-	var recovering = new WeakMap();
-	function pickBest(entries, limit = Infinity) {
+	function pickBest(entries) {
 		let best = null;
 		for (const entry of entries) {
 			if (!entry || !entry.isPlayable) continue;
 			const height = QUALITY_HEIGHT[entry.quality];
-			if (!height || height >= limit) continue;
+			if (!height || height > MAX_HEIGHT) continue;
 			const bestHeight = best ? QUALITY_HEIGHT[best.quality] : 0;
 			if (height > bestHeight) best = entry;
 			else if (height === bestHeight && !best.paygatedQualityDetails && entry.paygatedQualityDetails) best = entry;
 		}
 		return best;
 	}
-	function applyMaxQuality(player, limit = Infinity, current = null) {
+	function applyMaxQuality(player) {
 		try {
 			if (typeof player.getAvailableQualityData !== "function" || typeof player.setPlaybackQualityRange !== "function") return false;
-			const best = pickBest(player.getAvailableQualityData() || [], limit);
+			const best = pickBest(player.getAvailableQualityData() || []);
 			if (!best) return false;
-			if (best.quality === current) return true;
-			const recover = current !== null && [
-				"getCurrentTime",
-				"stopVideo",
-				"playVideo"
-			].every((name) => typeof player[name] === "function");
-			const time = recover ? player.getCurrentTime() : 0;
-			if (recover) player.stopVideo();
 			if (best.paygatedQualityDetails) player.setPlaybackQualityRange(best.quality, best.quality, best.formatId);
 			else player.setPlaybackQualityRange(best.quality, best.quality);
-			if (recover) {
-				if (time > 1) resume.set(player, {
-					id: videoIdOf(player),
-					time
-				});
-				player.playVideo();
-			}
 			return true;
 		} catch {
 			return false;
 		}
 	}
-	function videoIdOf(player) {
-		try {
-			return player.getVideoData().video_id;
-		} catch {
-			return;
-		}
-	}
-	function qualityOf(player) {
-		try {
-			return player.getPlaybackQuality();
-		} catch {
-			return;
-		}
-	}
-	function failedLimit(player, id) {
-		const record = failures.get(player);
-		return record && record.id === id ? record.limit : Infinity;
-	}
 	function handlePlaying(player) {
 		if (player.classList.contains("ad-showing")) return;
-		const id = videoIdOf(player);
-		if (!id) return;
-		recovering.delete(player);
-		const pending = resume.get(player);
-		if (pending) {
-			resume.delete(player);
-			try {
-				if (pending.id === id && typeof player.seekTo === "function" && Math.abs(player.getCurrentTime() - pending.time) > 1) player.seekTo(pending.time, true);
-			} catch {}
-		}
-		if (id !== applied.get(player)) {
-			if (applyMaxQuality(player, failedLimit(player, id))) applied.set(player, id);
+		let id;
+		try {
+			id = player.getVideoData().video_id;
+		} catch {
 			return;
 		}
-		const limit = failedLimit(player, id);
-		if (limit === Infinity) return;
-		const current = qualityOf(player);
-		const currentHeight = QUALITY_HEIGHT[current];
-		if (!currentHeight || currentHeight >= limit) return;
-		applyMaxQuality(player, limit, current);
-	}
-	function handleError(player) {
-		if (player.classList.contains("ad-showing")) return;
-		const id = videoIdOf(player);
-		const current = qualityOf(player);
-		const height = QUALITY_HEIGHT[current];
-		if (!id || !height) return;
-		if (recovering.get(player) === id) return;
-		const limit = Math.min(failedLimit(player, id), height);
-		failures.set(player, {
-			id,
-			limit
-		});
-		if (applyMaxQuality(player, limit, current)) recovering.set(player, id);
-	}
-	function isQualityFailure(video) {
-		const code = video.error && video.error.code;
-		return code !== 1 && code !== 2;
+		if (!id || id === applied.get(player)) return;
+		if (applyMaxQuality(player)) applied.set(player, id);
 	}
 	function playerOf(event) {
 		const target = event.target;
@@ -139,10 +74,6 @@
 		document.addEventListener("playing", (event) => {
 			const player = playerOf(event);
 			if (player) handlePlaying(player);
-		}, true);
-		document.addEventListener("error", (event) => {
-			const player = playerOf(event);
-			if (player && isQualityFailure(event.target)) handleError(player);
 		}, true);
 		const existing = document.querySelector(PLAYER_SELECTOR);
 		if (!existing) return;
