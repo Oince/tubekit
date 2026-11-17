@@ -235,9 +235,19 @@ function saveActiveScrollTop() {
 function syncScrollbarWidth() {
   const pane = state.activeTab === 'comments' ? state.commentsPane : state.relatedPane;
   if (!state.root || !pane || pane.offsetWidth === 0) return;
-  const width = `${Math.max(0, pane.offsetWidth - pane.clientWidth)}px`;
-  if (state.root.style.getPropertyValue(`--${SCRIPT_ID}-scrollbar-width`) === width) return;
-  state.root.style.setProperty(`--${SCRIPT_ID}-scrollbar-width`, width);
+  const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
+  // The root may only overhang the right column by the column's own right padding, or the page scrolls horizontally.
+  const secondary = state.watch?.querySelector(SELECTORS.secondary);
+  const padding = secondary ? parseFloat(getComputedStyle(secondary).paddingRight) : 0;
+  const overhang = Math.max(0, Math.min(scrollbar, Number.isFinite(padding) ? padding : 0));
+  setRootVariable('scrollbar-width', `${scrollbar}px`);
+  setRootVariable('rail-overhang', `${overhang}px`);
+}
+
+function setRootVariable(name, value) {
+  const property = `--${SCRIPT_ID}-${name}`;
+  if (state.root.style.getPropertyValue(property) === value) return;
+  state.root.style.setProperty(property, value);
 }
 
 function switchTab(tabName, options = {}) {

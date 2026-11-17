@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.5
+// @version      0.6.6
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -142,7 +142,7 @@
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 180px;
-      margin-right: calc(-1 * var(--${SCRIPT_ID}-scrollbar-width, 0px));
+      margin-right: calc(-1 * var(--${SCRIPT_ID}-rail-overhang, 0px));
       overflow: hidden;
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-bg);
@@ -524,9 +524,17 @@
 	function syncScrollbarWidth() {
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (!state.root || !pane || pane.offsetWidth === 0) return;
-		const width = `${Math.max(0, pane.offsetWidth - pane.clientWidth)}px`;
-		if (state.root.style.getPropertyValue(`--tubekit-scrollbar-width`) === width) return;
-		state.root.style.setProperty(`--${SCRIPT_ID}-scrollbar-width`, width);
+		const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
+		const secondary = state.watch?.querySelector(SELECTORS.secondary);
+		const padding = secondary ? parseFloat(getComputedStyle(secondary).paddingRight) : 0;
+		const overhang = Math.max(0, Math.min(scrollbar, Number.isFinite(padding) ? padding : 0));
+		setRootVariable("scrollbar-width", `${scrollbar}px`);
+		setRootVariable("rail-overhang", `${overhang}px`);
+	}
+	function setRootVariable(name, value) {
+		const property = `--${SCRIPT_ID}-${name}`;
+		if (state.root.style.getPropertyValue(property) === value) return;
+		state.root.style.setProperty(property, value);
 	}
 	function switchTab(tabName, options = {}) {
 		if (!state.root || !["comments", "related"].includes(tabName)) return;

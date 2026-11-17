@@ -331,6 +331,25 @@ test('panel root gets the pane scrollbar width as a CSS variable', async t => {
   assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '0px');
 });
 
+test('panel root overhang is capped by the right column padding', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  document.querySelector('#secondary').style.paddingRight = '16px';
+  let offset = 337;
+  const proto = w.HTMLElement.prototype;
+  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? offset : 0; } });
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
+  w.dispatchEvent(new w.Event('resize'));
+  await sleep(300);
+  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '17px');
+  assert.equal(root.style.getPropertyValue('--tubekit-rail-overhang'), '16px');
+  offset = 335;
+  w.dispatchEvent(new w.Event('resize'));
+  await sleep(300);
+  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '15px');
+  assert.equal(root.style.getPropertyValue('--tubekit-rail-overhang'), '15px');
+});
+
 test('selected tab survives leaving and re-entering the layout on the same video', async t => {
   const { document, watch } = await setup(t);
   document.querySelector('#tubekit-related-tab').click();

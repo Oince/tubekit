@@ -47,7 +47,7 @@ export function addStyles() {
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 180px;
-      margin-right: calc(-1 * var(--${SCRIPT_ID}-scrollbar-width, 0px));
+      margin-right: calc(-1 * var(--${SCRIPT_ID}-rail-overhang, 0px));
       overflow: hidden;
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-bg);
