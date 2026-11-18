@@ -125,7 +125,6 @@ export function addStyles() {
       padding-right: var(--${SCRIPT_ID}-pane-gutter, 0px);
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
-      contain: content;
     }
 
     .${SCRIPT_ID}-pane[data-active='true'] {

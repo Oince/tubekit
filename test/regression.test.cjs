@@ -592,6 +592,14 @@ test('emoji picker is not clipped inside the comments pane', async t => {
   assert.match(css, /yt-emoji-picker-renderer #search-panel[^{]*\{[^}]*width: 100% !important;/);
 });
 
+test('panes do not contain fixed-position menus such as the comment sort dropdown', async t => {
+  const { document } = await setup(t);
+  const css = document.getElementById('tubekit-styles').textContent;
+  const pane = css.match(/\.tubekit-pane \{([^}]*)\}/)[1];
+  // Layout/paint containment makes the pane the containing block of the fixed sort dropdown and clips it at the pane edge.
+  assert.doesNotMatch(pane, /\bcontain:/);
+});
+
 function spyScrollTop(pane) {
   const spyState = { value: 0, hidden: false };
   Object.defineProperty(pane, 'scrollTop', {

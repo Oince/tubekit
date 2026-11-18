@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.8
+// @version      0.6.9
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -220,7 +220,6 @@
       padding-right: var(--${SCRIPT_ID}-pane-gutter, 0px);
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
-      contain: content;
     }
 
     .${SCRIPT_ID}-pane[data-active='true'] {
