@@ -14,7 +14,7 @@ export function addStyles() {
       max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
       padding-top: 0 !important;
-      overflow-x: visible !important;
+      overflow-x: clip !important;
       overflow-y: clip !important;
     }
 
@@ -24,7 +24,7 @@ export function addStyles() {
       height: 100% !important;
       max-height: 100% !important;
       min-height: 0 !important;
-      overflow-x: visible !important;
+      overflow-x: clip !important;
       overflow-y: clip !important;
     }
 
@@ -47,7 +47,6 @@ export function addStyles() {
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 180px;
-      margin-right: calc(-1 * var(--${SCRIPT_ID}-rail-overhang, 0px));
       overflow: hidden;
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-bg);

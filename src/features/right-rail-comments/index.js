@@ -1,4 +1,4 @@
-import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, MIN_VIEWPORT_WIDTH, SCRIPT_ID, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
+import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, MIN_VIEWPORT_WIDTH, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
 import { addStyles } from './styles.js';
 
 const state = {
@@ -236,17 +236,11 @@ function syncScrollbarInsets() {
   const pane = state.activeTab === 'comments' ? state.commentsPane : state.relatedPane;
   if (!state.root || !pane || pane.offsetWidth === 0) return;
   const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
-  // The root overhangs the right column by its own right padding (never more, or the page scrolls horizontally).
-  // That margin always holds the scrollbar, so overlay scrollbars float over empty space instead of comment text.
-  const secondary = state.watch?.querySelector(SELECTORS.secondary);
-  const padding = secondary ? parseFloat(getComputedStyle(secondary).paddingRight) : 0;
-  const overhang = Math.max(0, Number.isFinite(padding) ? padding : 0);
-  // Pane padding that keeps content at the native column edge when the scrollbar is narrower than the overhang.
-  const gutter = Math.max(0, overhang - scrollbar);
-  setRootVariable('rail-overhang', `${overhang}px`);
-  setRootVariable('pane-gutter', `${gutter}px`);
+  // The scrollbar area is a fixed width inside the panel; overlay scrollbars float over this empty gutter instead of comment text.
+  // Pane padding fills whatever the native scrollbar leaves of that area.
+  setRootVariable('pane-gutter', `${Math.max(0, SCROLLBAR_AREA_WIDTH - scrollbar)}px`);
   // Distance from the root's right edge to the content's right edge, used by the tab row and the toast.
-  setRootVariable('content-inset', `${Math.max(scrollbar, overhang)}px`);
+  setRootVariable('content-inset', `${Math.max(scrollbar, SCROLLBAR_AREA_WIDTH)}px`);
 }
 
 function setRootVariable(name, value) {

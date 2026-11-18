@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.7
+// @version      0.6.8
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -109,7 +109,7 @@
       max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
       padding-top: 0 !important;
-      overflow-x: visible !important;
+      overflow-x: clip !important;
       overflow-y: clip !important;
     }
 
@@ -119,7 +119,7 @@
       height: 100% !important;
       max-height: 100% !important;
       min-height: 0 !important;
-      overflow-x: visible !important;
+      overflow-x: clip !important;
       overflow-y: clip !important;
     }
 
@@ -142,7 +142,6 @@
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 180px;
-      margin-right: calc(-1 * var(--${SCRIPT_ID}-rail-overhang, 0px));
       overflow: hidden;
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-bg);
@@ -526,13 +525,8 @@
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (!state.root || !pane || pane.offsetWidth === 0) return;
 		const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
-		const secondary = state.watch?.querySelector(SELECTORS.secondary);
-		const padding = secondary ? parseFloat(getComputedStyle(secondary).paddingRight) : 0;
-		const overhang = Math.max(0, Number.isFinite(padding) ? padding : 0);
-		const gutter = Math.max(0, overhang - scrollbar);
-		setRootVariable("rail-overhang", `${overhang}px`);
-		setRootVariable("pane-gutter", `${gutter}px`);
-		setRootVariable("content-inset", `${Math.max(scrollbar, overhang)}px`);
+		setRootVariable("pane-gutter", `${Math.max(0, 17 - scrollbar)}px`);
+		setRootVariable("content-inset", `${Math.max(scrollbar, 17)}px`);
 	}
 	function setRootVariable(name, value) {
 		const property = `--${SCRIPT_ID}-${name}`;
