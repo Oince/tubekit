@@ -232,16 +232,21 @@ function saveActiveScrollTop() {
   if (pane) state.scrollTop[state.activeTab] = pane.scrollTop;
 }
 
-function syncScrollbarWidth() {
+function syncScrollbarInsets() {
   const pane = state.activeTab === 'comments' ? state.commentsPane : state.relatedPane;
   if (!state.root || !pane || pane.offsetWidth === 0) return;
   const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
-  // The root may only overhang the right column by the column's own right padding, or the page scrolls horizontally.
+  // The root overhangs the right column by its own right padding (never more, or the page scrolls horizontally).
+  // That margin always holds the scrollbar, so overlay scrollbars float over empty space instead of comment text.
   const secondary = state.watch?.querySelector(SELECTORS.secondary);
   const padding = secondary ? parseFloat(getComputedStyle(secondary).paddingRight) : 0;
-  const overhang = Math.max(0, Math.min(scrollbar, Number.isFinite(padding) ? padding : 0));
-  setRootVariable('scrollbar-width', `${scrollbar}px`);
+  const overhang = Math.max(0, Number.isFinite(padding) ? padding : 0);
+  // Pane padding that keeps content at the native column edge when the scrollbar is narrower than the overhang.
+  const gutter = Math.max(0, overhang - scrollbar);
   setRootVariable('rail-overhang', `${overhang}px`);
+  setRootVariable('pane-gutter', `${gutter}px`);
+  // Distance from the root's right edge to the content's right edge, used by the tab row and the toast.
+  setRootVariable('content-inset', `${Math.max(scrollbar, overhang)}px`);
 }
 
 function setRootVariable(name, value) {
@@ -272,7 +277,7 @@ function switchTab(tabName, options = {}) {
     if (generation !== state.generation || !activePane?.isConnected || state.activeTab !== tabName) return;
     activePane.scrollTop = options.reset ? 0 : state.scrollTop[tabName];
     activePane.dispatchEvent(new Event('scroll'));
-    syncScrollbarWidth();
+    syncScrollbarInsets();
   });
 }
 
@@ -652,7 +657,7 @@ function evaluate() {
     syncReplacedComments();
     syncReplacedRelated();
     syncSpecialPanel();
-    syncScrollbarWidth();
+    syncScrollbarInsets();
   }
 }
 

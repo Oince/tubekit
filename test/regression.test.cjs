@@ -315,7 +315,7 @@ test('special panels release rail clipping and closing them restores the panel',
   assert.equal(w.getComputedStyle(secondary).overflowY, 'clip');
 });
 
-test('panel root gets the pane scrollbar width as a CSS variable', async t => {
+test('panel root gets the content inset from the pane scrollbar width', async t => {
   const { w, document } = await setup(t);
   const root = document.querySelector('#tubekit-root');
   let offset = 335;
@@ -324,30 +324,45 @@ test('panel root gets the pane scrollbar width as a CSS variable', async t => {
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
   w.dispatchEvent(new w.Event('resize'));
   await sleep(300);
-  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '15px');
+  assert.equal(root.style.getPropertyValue('--tubekit-content-inset'), '15px');
   offset = 320;
   document.querySelector('#tubekit-related-tab').click();
   await sleep(100);
-  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '0px');
+  assert.equal(root.style.getPropertyValue('--tubekit-content-inset'), '0px');
+  assert.equal(root.style.getPropertyValue('--tubekit-pane-gutter'), '0px');
 });
 
-test('panel root overhang is capped by the right column padding', async t => {
+test('panel root overhang is the right column padding and the pane gutter fills the rest', async t => {
   const { w, document } = await setup(t);
   const root = document.querySelector('#tubekit-root');
   document.querySelector('#secondary').style.paddingRight = '16px';
-  let offset = 337;
+  let offset = 320;
   const proto = w.HTMLElement.prototype;
   Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? offset : 0; } });
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
+  // Scrollbar width 0 (overlay), 15 (Chrome), 17 (Safari).
+  for (const [scrollbar, gutter, inset] of [[0, 16, 16], [15, 1, 16], [17, 0, 17]]) {
+    offset = 320 + scrollbar;
+    w.dispatchEvent(new w.Event('resize'));
+    await sleep(300);
+    assert.equal(root.style.getPropertyValue('--tubekit-rail-overhang'), '16px');
+    assert.equal(root.style.getPropertyValue('--tubekit-pane-gutter'), `${gutter}px`);
+    assert.equal(root.style.getPropertyValue('--tubekit-content-inset'), `${inset}px`);
+  }
+});
+
+test('panel root has no overhang or gutter without right column padding', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  document.querySelector('#secondary').style.paddingRight = '0px';
+  const proto = w.HTMLElement.prototype;
+  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 335 : 0; } });
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
   w.dispatchEvent(new w.Event('resize'));
   await sleep(300);
-  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '17px');
-  assert.equal(root.style.getPropertyValue('--tubekit-rail-overhang'), '16px');
-  offset = 335;
-  w.dispatchEvent(new w.Event('resize'));
-  await sleep(300);
-  assert.equal(root.style.getPropertyValue('--tubekit-scrollbar-width'), '15px');
-  assert.equal(root.style.getPropertyValue('--tubekit-rail-overhang'), '15px');
+  assert.equal(root.style.getPropertyValue('--tubekit-rail-overhang'), '0px');
+  assert.equal(root.style.getPropertyValue('--tubekit-pane-gutter'), '0px');
+  assert.equal(root.style.getPropertyValue('--tubekit-content-inset'), '15px');
 });
 
 test('selected tab survives leaving and re-entering the layout on the same video', async t => {

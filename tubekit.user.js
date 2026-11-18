@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.6
+// @version      0.6.7
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -172,7 +172,7 @@
       flex: 0 0 auto;
       gap: 4px;
       padding: 0 0 8px;
-      margin-right: var(--${SCRIPT_ID}-scrollbar-width, 0px);
+      margin-right: var(--${SCRIPT_ID}-content-inset, 0px);
       background: var(--${SCRIPT_ID}-bg);
       border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
     }
@@ -218,6 +218,7 @@
       display: none;
       overflow-x: hidden;
       overflow-y: auto;
+      padding-right: var(--${SCRIPT_ID}-pane-gutter, 0px);
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
       contain: content;
@@ -299,7 +300,7 @@
     #${SCRIPT_ID}-toast {
       position: absolute;
       z-index: 5;
-      right: calc(12px + var(--${SCRIPT_ID}-scrollbar-width, 0px));
+      right: calc(12px + var(--${SCRIPT_ID}-content-inset, 0px));
       bottom: 12px;
       left: 12px;
       box-sizing: border-box;
@@ -521,15 +522,17 @@
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (pane) state.scrollTop[state.activeTab] = pane.scrollTop;
 	}
-	function syncScrollbarWidth() {
+	function syncScrollbarInsets() {
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (!state.root || !pane || pane.offsetWidth === 0) return;
 		const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
 		const secondary = state.watch?.querySelector(SELECTORS.secondary);
 		const padding = secondary ? parseFloat(getComputedStyle(secondary).paddingRight) : 0;
-		const overhang = Math.max(0, Math.min(scrollbar, Number.isFinite(padding) ? padding : 0));
-		setRootVariable("scrollbar-width", `${scrollbar}px`);
+		const overhang = Math.max(0, Number.isFinite(padding) ? padding : 0);
+		const gutter = Math.max(0, overhang - scrollbar);
 		setRootVariable("rail-overhang", `${overhang}px`);
+		setRootVariable("pane-gutter", `${gutter}px`);
+		setRootVariable("content-inset", `${Math.max(scrollbar, overhang)}px`);
 	}
 	function setRootVariable(name, value) {
 		const property = `--${SCRIPT_ID}-${name}`;
@@ -554,7 +557,7 @@
 			if (generation !== state.generation || !activePane?.isConnected || state.activeTab !== tabName) return;
 			activePane.scrollTop = options.reset ? 0 : state.scrollTop[tabName];
 			activePane.dispatchEvent(new Event("scroll"));
-			syncScrollbarWidth();
+			syncScrollbarInsets();
 		});
 	}
 	function showToast(message) {
@@ -867,7 +870,7 @@
 			syncReplacedComments();
 			syncReplacedRelated();
 			syncSpecialPanel();
-			syncScrollbarWidth();
+			syncScrollbarInsets();
 		}
 	}
 	function isInsideAdoptedContent(node) {

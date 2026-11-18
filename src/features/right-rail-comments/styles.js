@@ -77,7 +77,7 @@ export function addStyles() {
       flex: 0 0 auto;
       gap: 4px;
       padding: 0 0 8px;
-      margin-right: var(--${SCRIPT_ID}-scrollbar-width, 0px);
+      margin-right: var(--${SCRIPT_ID}-content-inset, 0px);
       background: var(--${SCRIPT_ID}-bg);
       border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
     }
@@ -123,6 +123,7 @@ export function addStyles() {
       display: none;
       overflow-x: hidden;
       overflow-y: auto;
+      padding-right: var(--${SCRIPT_ID}-pane-gutter, 0px);
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
       contain: content;
@@ -204,7 +205,7 @@ export function addStyles() {
     #${SCRIPT_ID}-toast {
       position: absolute;
       z-index: 5;
-      right: calc(12px + var(--${SCRIPT_ID}-scrollbar-width, 0px));
+      right: calc(12px + var(--${SCRIPT_ID}-content-inset, 0px));
       bottom: 12px;
       left: 12px;
       box-sizing: border-box;
