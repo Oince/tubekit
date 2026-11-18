@@ -13,6 +13,8 @@ export function addStyles() {
       height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
+      /* A margin, not YouTube's padding, keeps the top level with the player even when a short left column leaves sticky no room. */
+      margin-top: 12px !important;
       padding-top: 0 !important;
       overflow-x: clip !important;
       overflow-y: clip !important;

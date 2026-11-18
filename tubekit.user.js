@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.9
+// @version      0.6.10
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -108,6 +108,8 @@
       height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
+      /* A margin, not YouTube's padding, keeps the top level with the player even when a short left column leaves sticky no room. */
+      margin-top: 12px !important;
       padding-top: 0 !important;
       overflow-x: clip !important;
       overflow-y: clip !important;
@@ -567,6 +569,21 @@
 		if (!node?.querySelector("ytd-message-renderer, #message")) return false;
 		return !node.querySelector("ytd-comments-header-renderer, ytd-comment-thread-renderer");
 	}
+	function showCommentsUnavailable(generation, node) {
+		state.commentsReady = true;
+		clearTimeout(state.commentsTimeout);
+		setCommentsStatus(null);
+		showToast(labels().unavailable);
+		clearTimeout(state.unavailableTimer);
+		state.unavailableTimer = window.setTimeout(() => {
+			if (generation === state.generation && node === state.commentsNode && state.videoId === readVideoId()) switchTab("related");
+		}, 900);
+	}
+	function liveCommentsOff() {
+		const node = state.commentsNode;
+		if (!node?.hasAttribute("hidden") || node.firstElementChild) return false;
+		return Boolean(state.watch?.querySelector(`${SELECTORS.secondaryInner} ytd-live-chat-frame`));
+	}
 	function observeComments() {
 		state.commentsObserver?.disconnect();
 		if (!state.commentsNode) return;
@@ -576,16 +593,13 @@
 		const check = () => {
 			if (generation !== state.generation || node !== state.commentsNode || state.videoId !== readVideoId()) return;
 			if (commentsUnavailable(state.commentsNode)) {
-				state.commentsReady = true;
-				clearTimeout(state.commentsTimeout);
-				setCommentsStatus(null);
 				if (!unavailable) {
 					unavailable = true;
-					showToast(labels().unavailable);
-					clearTimeout(state.unavailableTimer);
-					state.unavailableTimer = window.setTimeout(() => {
-						if (generation === state.generation && node === state.commentsNode && state.videoId === readVideoId()) switchTab("related");
-					}, 900);
+					showCommentsUnavailable(generation, node);
+				} else {
+					state.commentsReady = true;
+					clearTimeout(state.commentsTimeout);
+					setCommentsStatus(null);
 				}
 				return;
 			}
@@ -660,6 +674,10 @@
 		clearTimeout(state.commentsTimeout);
 		if (attachComments(generation) || state.commentsReady) return;
 		if (generation !== state.generation || !state.root?.isConnected) return;
+		if (performance.now() - startedAt >= 3e3 && liveCommentsOff()) {
+			showCommentsUnavailable(generation, state.commentsNode);
+			return;
+		}
 		if (performance.now() - startedAt >= 2e4) {
 			setCommentsStatus("error");
 			return;
@@ -705,7 +723,8 @@
 			const previous = state.suspendedBy;
 			state.suspendedBy = null;
 			state.root.dataset.suspended = "false";
-			switchTab(previous === "chat" ? "comments" : state.tabBeforeSpecialPanel, { keepSaved: true });
+			const chatTab = state.activeTab === "related" ? "related" : "comments";
+			switchTab(previous === "chat" ? chatTab : state.tabBeforeSpecialPanel, { keepSaved: true });
 			return;
 		}
 		if (special && special !== state.suspendedBy) state.suspendedBy = special;

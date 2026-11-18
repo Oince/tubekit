@@ -1,4 +1,4 @@
-import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, MIN_VIEWPORT_WIDTH, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
+import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, LIVE_COMMENTS_GRACE_MS, MIN_VIEWPORT_WIDTH, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
 import { addStyles } from './styles.js';
 
 const state = {
@@ -292,6 +292,27 @@ function commentsUnavailable(node) {
   return !node.querySelector('ytd-comments-header-renderer, ytd-comment-thread-renderer');
 }
 
+// Comments are off: tell the user and fall back to the related tab.
+function showCommentsUnavailable(generation, node) {
+  state.commentsReady = true;
+  clearTimeout(state.commentsTimeout);
+  setCommentsStatus(null);
+  showToast(labels().unavailable);
+  clearTimeout(state.unavailableTimer);
+  state.unavailableTimer = window.setTimeout(() => {
+    if (generation === state.generation && node === state.commentsNode && state.videoId === readVideoId()) {
+      switchTab('related');
+    }
+  }, 900);
+}
+
+// Live streams leave the comments renderer hidden and empty beside the chat instead of showing a message.
+function liveCommentsOff() {
+  const node = state.commentsNode;
+  if (!node?.hasAttribute('hidden') || node.firstElementChild) return false;
+  return Boolean(state.watch?.querySelector(`${SELECTORS.secondaryInner} ytd-live-chat-frame`));
+}
+
 function observeComments() {
   state.commentsObserver?.disconnect();
   if (!state.commentsNode) return;
@@ -302,18 +323,13 @@ function observeComments() {
   const check = () => {
     if (generation !== state.generation || node !== state.commentsNode || state.videoId !== readVideoId()) return;
     if (commentsUnavailable(state.commentsNode)) {
-      state.commentsReady = true;
-      clearTimeout(state.commentsTimeout);
-      setCommentsStatus(null);
       if (!unavailable) {
         unavailable = true;
-        showToast(labels().unavailable);
-        clearTimeout(state.unavailableTimer);
-        state.unavailableTimer = window.setTimeout(() => {
-          if (generation === state.generation && node === state.commentsNode && state.videoId === readVideoId()) {
-            switchTab('related');
-          }
-        }, 900);
+        showCommentsUnavailable(generation, node);
+      } else {
+        state.commentsReady = true;
+        clearTimeout(state.commentsTimeout);
+        setCommentsStatus(null);
       }
       return;
     }
@@ -399,6 +415,12 @@ function waitForComments(generation, startedAt = performance.now()) {
   if (attachComments(generation) || state.commentsReady) return;
   if (generation !== state.generation || !state.root?.isConnected) return;
 
+  // Regular videos also start hidden and empty, but only until their comments load.
+  if (performance.now() - startedAt >= LIVE_COMMENTS_GRACE_MS && liveCommentsOff()) {
+    showCommentsUnavailable(generation, state.commentsNode);
+    return;
+  }
+
   if (performance.now() - startedAt >= COMMENTS_WAIT_MS) {
     setCommentsStatus('error');
     return;
@@ -458,7 +480,9 @@ function syncSpecialPanel() {
     const previous = state.suspendedBy;
     state.suspendedBy = null;
     state.root.dataset.suspended = 'false';
-    switchTab(previous === 'chat' ? 'comments' : state.tabBeforeSpecialPanel, { keepSaved: true });
+    // A live stream switches to related while its chat covers the panel; don't return to its empty comments tab.
+    const chatTab = state.activeTab === 'related' ? 'related' : 'comments';
+    switchTab(previous === 'chat' ? chatTab : state.tabBeforeSpecialPanel, { keepSaved: true });
     return;
   }
 

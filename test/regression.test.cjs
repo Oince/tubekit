@@ -15,13 +15,14 @@ async function setup(t, {
   secondary = { width: 400, left: 920, right: 1320 },
   expectRoot = true,
   htmlAttrs = '',
+  liveStream = false,
 } = {}) {
   const content = disabled
     ? `<ytd-message-renderer>${disabledText}</ytd-message-renderer>`
-    : '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
+    : liveStream ? '' : '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
   const dom = new JSDOM(`<html lang="en" ${htmlAttrs}><head></head><body><ytd-app>
     <ytd-watch-flexy video-id="A"><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
-      <ytd-comments id="comments">${content}</ytd-comments>
+      <ytd-comments id="comments"${liveStream ? ' hidden disable-upgrade' : ''}>${content}</ytd-comments>
     </div></div><div id="secondary"><div id="secondary-inner">
       <div id="related">related</div>
     </div></div></ytd-watch-flexy></ytd-app></body></html>`, {
@@ -647,6 +648,41 @@ test('scroll position survives opening and closing a special panel on both tabs'
     assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
     assert.equal(panes[tab].value, 300, `${tab} scroll restored`);
   }
+});
+
+test('live streams with hidden comments beside the chat fall back to related', async t => {
+  const { document } = await setup(t, { liveStream: true });
+  // Regular videos also start with hidden, empty comments; without a chat this is still loading.
+  await sleep(3400);
+  assert.equal(selected(document), 'comments');
+  assert.ok(document.querySelector('#tubekit-comments-pane .tubekit-status'));
+  const chat = document.createElement('div');
+  chat.id = 'chat-container';
+  chat.innerHTML = '<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>';
+  document.querySelector('#secondary-inner').prepend(chat);
+  await sleep(1400);
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'true');
+  assert.equal(selected(document), 'related');
+  assert.equal(document.querySelector('#tubekit-comments-pane .tubekit-status'), null);
+  // Closing the chat shows the panel again on related, not on the empty comments tab.
+  chat.firstElementChild.setAttribute('collapsed', '');
+  await sleep(200);
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
+  assert.equal(selected(document), 'related');
+});
+
+test('closing a live chat on a video with comments returns to the comments tab', async t => {
+  const { document } = await setup(t);
+  const chat = document.createElement('div');
+  chat.id = 'chat-container';
+  chat.innerHTML = '<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>';
+  document.querySelector('#secondary-inner').prepend(chat);
+  await sleep(200);
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'true');
+  chat.firstElementChild.setAttribute('collapsed', '');
+  await sleep(200);
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
+  assert.equal(selected(document), 'comments');
 });
 
 function shortsPage(t, url) {
