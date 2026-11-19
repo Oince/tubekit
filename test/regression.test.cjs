@@ -316,17 +316,17 @@ test('special panels release rail clipping and closing them restores the panel',
   assert.equal(w.getComputedStyle(secondary).overflowY, 'clip');
 });
 
-test('panel root keeps a 17px scrollbar area regardless of the right column padding', async t => {
+test('panel root keeps a 14px scrollbar area regardless of the right column padding', async t => {
   const { w, document } = await setup(t);
   const root = document.querySelector('#tubekit-root');
   let offset = 320;
   const proto = w.HTMLElement.prototype;
   Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? offset : 0; } });
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
-  // Scrollbar width 0 (overlay), 15 (Chrome), 17 (Safari), 20.
+  // Scrollbar width 0 (overlay), 12 (narrower), 15 (Chrome), 17 (Safari).
   for (const padding of ['16px', '0px']) {
     document.querySelector('#secondary').style.paddingRight = padding;
-    for (const [scrollbar, gutter, inset] of [[0, 17, 17], [15, 2, 17], [17, 0, 17], [20, 0, 20]]) {
+    for (const [scrollbar, gutter, inset] of [[0, 14, 14], [12, 2, 14], [15, 0, 15], [17, 0, 17]]) {
       offset = 320 + scrollbar;
       w.dispatchEvent(new w.Event('resize'));
       await sleep(300);
@@ -341,15 +341,15 @@ test('panel root recomputes the scrollbar area when switching tabs', async t => 
   const { w, document } = await setup(t);
   const root = document.querySelector('#tubekit-root');
   const proto = w.HTMLElement.prototype;
-  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? (this.id.includes('related') ? 320 : 335) : 0; } });
+  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? (this.id.includes('related') ? 320 : 332) : 0; } });
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
   w.dispatchEvent(new w.Event('resize'));
   await sleep(300);
   assert.equal(root.style.getPropertyValue('--tubekit-pane-gutter'), '2px');
   document.querySelector('#tubekit-related-tab').click();
   await sleep(100);
-  assert.equal(root.style.getPropertyValue('--tubekit-pane-gutter'), '17px');
-  assert.equal(root.style.getPropertyValue('--tubekit-content-inset'), '17px');
+  assert.equal(root.style.getPropertyValue('--tubekit-pane-gutter'), '14px');
+  assert.equal(root.style.getPropertyValue('--tubekit-content-inset'), '14px');
 });
 
 test('selected tab survives leaving and re-entering the layout on the same video', async t => {

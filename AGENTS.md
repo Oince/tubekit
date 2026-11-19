@@ -80,6 +80,7 @@
 - 댓글 패널 적용 조건은 화면 너비 1015 CSS px 이상의 2열 화면이다. 1015px은 YouTube가 1열에서 2열로 바뀌는 `innerWidth`(스크롤바 포함)다. 기본 검증 너비는 1440px이며, 경계 문제는 1014·1015px도 확인한다.
 - 다크 모드는 `emulate`로 확인한다.
 - 댓글 패널의 스크롤바 배치를 바꾸면 스크롤바 종류별로 확인한다. 맥 오버레이 스크롤바(트랙패드만 쓸 때)와 iPad 사파리는 `emulate` 뷰포트에 `,mobile`만 붙이면(예: `1440x900x1,mobile`, `1194x834x1,mobile`) 데스크톱 화면 그대로 재현된다. 오른쪽 열이 화면 끝에 붙는 너비에서는 페이지 스크롤바와 패널 스크롤바가 겹치지 않는지도 본다. 자리를 차지하는 스크롤바(마우스 연결 시, Safari 17px)는 `.tubekit-pane`에 `scrollbar-width: auto; scrollbar-color: auto`와 `::-webkit-scrollbar { width: 17px }`를 주입해 재현한다.
+- macOS "스크롤 막대 보기"가 `자동으로`이면 Karabiner 때문에 마우스 연결로 인식되어 자리를 차지하는 스크롤바가 뜬다. 오버레이로 보려면 `스크롤 할 때`로 둔다.
 - 모바일 화면(`m.youtube.com`)은 `emulate`로 모바일 뷰포트(터치 포함)와 iPhone User-Agent를 주어 확인한다. User-Agent를 바꾼 뒤에는 페이지를 다시 불러와 YouTube가 모바일 페이지를 내려주게 한다.
 - 어느 기기를 확인해야 하는지는 "사용 환경"을 따른다.
 

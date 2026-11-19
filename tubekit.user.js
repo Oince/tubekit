@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.10
+// @version      0.6.11
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -526,8 +526,8 @@
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (!state.root || !pane || pane.offsetWidth === 0) return;
 		const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
-		setRootVariable("pane-gutter", `${Math.max(0, 17 - scrollbar)}px`);
-		setRootVariable("content-inset", `${Math.max(scrollbar, 17)}px`);
+		setRootVariable("pane-gutter", `${Math.max(0, 14 - scrollbar)}px`);
+		setRootVariable("content-inset", `${Math.max(scrollbar, 14)}px`);
 	}
 	function setRootVariable(name, value) {
 		const property = `--${SCRIPT_ID}-${name}`;
