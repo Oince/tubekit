@@ -9,6 +9,7 @@
 - `test/build.test.cjs`는 커밋된 `tubekit.user.js`가 `src/`의 현재 빌드 결과와 같은지 확인한다. 빌드를 잊으면 `npm test`가 실패한다.
 - jsdom에는 레이아웃 엔진이 없어 화면 배치를 가정하므로 실제 화면 배치·무한 스크롤·댓글 작성·브라우저별 레이아웃 동작은 테스트로 확인할 수 없다. 그래서 아래의 브라우저 검증이 필수다.
 - 브라우저 재현과 검증은 `chrome-devtools` MCP(Chrome)로 한다. 기기별 환경은 아래 "사용 환경"을 본다.
+- Safari에 접근해야 할 때는 `safari-mcp` MCP(`/usr/bin/safaridriver --mcp`)를 쓴다.
 
 ## 사용 환경
 

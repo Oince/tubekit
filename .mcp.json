@@ -9,6 +9,14 @@
         "--chrome-arg=--mute-audio"
       ],
       "env": {}
+    },
+    "safari-mcp": {
+      "type": "stdio",
+      "command": "/usr/bin/safaridriver",
+      "args": [
+        "--mcp"
+      ],
+      "env": {}
     }
   }
 }
