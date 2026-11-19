@@ -110,3 +110,9 @@ PR은 쓰지 않는다. 작업마다 브랜치를 만들고, 끝나면 로컬에
 - 병합 전에 브랜치에서 `npm test`가 통과하는지 확인한다.
 - 작업이 끝나면 `main`에서 스쿼시 병합해 작업 하나를 커밋 하나로 남기고, 병합한 브랜치는 지운다(`git branch -D`).
 - 브랜치 안의 커밋은 작업 단위로 알아서 한다. 병합과 푸시는 사용자가 요청할 때만 한다.
+
+## Agent skills
+
+### Domain docs
+
+단일 맥락(single-context): 루트의 `GLOSSARY.md` 하나와 `docs/adr/`. `docs/agents/domain.md`를 본다.
