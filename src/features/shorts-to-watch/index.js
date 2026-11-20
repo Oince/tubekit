@@ -6,7 +6,6 @@ function shortsIdFromPath(pathname) {
   return match && ID_PATTERN.test(match[1]) ? match[1] : null;
 }
 
-// 이동은 이 함수 하나로 모은다(테스트가 계측한다).
 function redirectTo(url) {
   location.replace(url);
 }
@@ -33,7 +32,6 @@ function watchEndpointFor(endpoint) {
   };
 }
 
-// 데스크톱(yt-navigate)과 모바일(window의 navigate) 공용.
 function rewriteEndpoint(event) {
   const detail = event.detail;
   const watch = detail && watchEndpointFor(detail.endpoint);

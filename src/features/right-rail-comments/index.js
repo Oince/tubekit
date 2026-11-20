@@ -89,13 +89,10 @@ function isTheaterOrFullscreen(watch) {
   );
 }
 
-// Theater mode also sets full-bleed-player, so only these two mean fullscreen.
 function isFullscreen(watch) {
   return Boolean(document.fullscreenElement || watch?.hasAttribute('fullscreen'));
 }
 
-// YouTube decides the two-column layout itself (is-two-columns_), so no pixel threshold here:
-// the width where it switches differs between classic and overlay scrollbars.
 function isTwoColumnLayout(watch) {
   if (!watch || !watch.hasAttribute('is-two-columns_')) return false;
 
@@ -234,8 +231,6 @@ function isHidden() {
   return state.root?.dataset.suspended === 'true';
 }
 
-// A pane that is not rendered reads 0: our own hold hides it, and so does YouTube hiding the right column
-// (fullscreen), possibly before we notice. Keep the last position saved while it is shown.
 function isPaneShown(pane) {
   return Boolean(pane) && !isHidden() && pane.getClientRects().length > 0;
 }
@@ -245,8 +240,6 @@ function saveActiveScrollTop() {
   if (isPaneShown(pane)) state.scrollTop[state.activeTab] = pane.scrollTop;
 }
 
-// Record the time for deferring evaluation, and the position of a shown pane, so a later hold never depends on
-// reading the pane before it is hidden.
 function recordPaneScroll(event) {
   state.lastPaneScrollAt = performance.now();
   const pane = event.currentTarget;
@@ -257,10 +250,7 @@ function syncScrollbarInsets() {
   const pane = state.activeTab === 'comments' ? state.commentsPane : state.relatedPane;
   if (!state.root || !pane || pane.offsetWidth === 0) return;
   const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
-  // The scrollbar area is a fixed width inside the panel; overlay scrollbars float over this empty gutter instead of comment text.
-  // Pane padding fills whatever the native scrollbar leaves of that area.
   setRootVariable('pane-gutter', `${Math.max(0, SCROLLBAR_AREA_WIDTH - scrollbar)}px`);
-  // Distance from the root's right edge to the content's right edge, used by the tab row and the toast.
   setRootVariable('content-inset', `${Math.max(scrollbar, SCROLLBAR_AREA_WIDTH)}px`);
 }
 
@@ -273,7 +263,6 @@ function setRootVariable(name, value) {
 function switchTab(tabName, options = {}) {
   if (!state.root || !['comments', 'related'].includes(tabName)) return;
 
-  // Save the current position even when re-selecting the same tab; keepSaved skips it for panes that were hidden.
   if (!options.keepSaved) saveActiveScrollTop();
 
   state.activeTab = tabName;
@@ -288,7 +277,6 @@ function switchTab(tabName, options = {}) {
 
   const activePane = tabName === 'comments' ? state.commentsPane : state.relatedPane;
   const generation = state.generation;
-  // Read the target now: a scroll event fired while the pane reappears must not change it before the frame.
   const target = options.reset ? 0 : state.scrollTop[tabName];
   requestAnimationFrame(() => {
     if (generation !== state.generation || !activePane?.isConnected || state.activeTab !== tabName) return;
@@ -309,13 +297,11 @@ function showToast(message) {
   }, 4_500);
 }
 
-// Language-independent: a message renderer without a header or any thread means comments are off.
 function commentsUnavailable(node) {
   if (!node?.querySelector('ytd-message-renderer, #message')) return false;
   return !node.querySelector('ytd-comments-header-renderer, ytd-comment-thread-renderer');
 }
 
-// Comments are off: tell the user and fall back to the related tab.
 function showCommentsUnavailable(generation, node) {
   state.commentsReady = true;
   clearTimeout(state.commentsTimeout);
@@ -329,7 +315,6 @@ function showCommentsUnavailable(generation, node) {
   }, 900);
 }
 
-// Live streams leave the comments renderer hidden and empty beside the chat instead of showing a message.
 function liveCommentsOff() {
   const node = state.commentsNode;
   if (!node?.hasAttribute('hidden') || node.firstElementChild) return false;
@@ -438,7 +423,6 @@ function waitForComments(generation, startedAt = performance.now()) {
   if (attachComments(generation) || state.commentsReady) return;
   if (generation !== state.generation || !state.root?.isConnected) return;
 
-  // Regular videos also start hidden and empty, but only until their comments load.
   if (performance.now() - startedAt >= LIVE_COMMENTS_GRACE_MS && liveCommentsOff()) {
     showCommentsUnavailable(generation, state.commentsNode);
     return;
@@ -486,7 +470,6 @@ function detectSpecialPanel() {
   return systemPanel ? 'engagement' : null;
 }
 
-// The panel stays hidden while a YouTube panel or fullscreen holds it.
 function applySuspended() {
   const held = Boolean(state.suspendedBy || state.fullscreenHeld);
   document.documentElement.classList.toggle(`${SCRIPT_ID}-suspended`, held);
@@ -494,7 +477,6 @@ function applySuspended() {
 }
 
 function syncSpecialPanel() {
-  // Fullscreen hides the whole right column, so its panels look closed; keep the current state until it ends.
   if (!state.root || state.fullscreenHeld) return;
   const special = detectSpecialPanel();
 
@@ -510,7 +492,6 @@ function syncSpecialPanel() {
     const previous = state.suspendedBy;
     state.suspendedBy = null;
     applySuspended();
-    // A live stream switches to related while its chat covers the panel; don't return to its empty comments tab.
     const chatTab = state.activeTab === 'related' ? 'related' : 'comments';
     switchTab(previous === 'chat' ? chatTab : state.tabBeforeSpecialPanel, { keepSaved: true });
     return;
@@ -530,9 +511,7 @@ function holdForFullscreen() {
 function releaseFullscreenHold() {
   const heldBySpecialPanel = Boolean(state.suspendedBy);
   state.fullscreenHeld = false;
-  // A YouTube panel still open keeps the panel hidden; one closed meanwhile restores the panel its own way.
   syncSpecialPanel();
-  // Keep the tab current at the end of fullscreen (comments may have turned out to be off) and restore its position.
   if (!heldBySpecialPanel && !state.suspendedBy) switchTab(state.activeTab, { keepSaved: true });
 }
 
@@ -603,7 +582,6 @@ function mount(watch) {
   const generation = state.generation;
   state.watch = watch;
   state.videoId = readVideoId();
-  // Keep the chosen tab when the panel returns on the same video (e.g. after theater mode or a narrow window).
   const initialTab = state.lastTab?.videoId === state.videoId ? state.lastTab.tab : 'comments';
   state.lastTab = null;
   state.activeTab = initialTab;
@@ -628,7 +606,6 @@ function mount(watch) {
 
 function restoreNode(node, homeMarker, kind, beforeNode = null) {
   const watch = state.watch;
-  // Never put an old video's content into a reused watch renderer.
   if (!node || !watch?.isConnected || watch.getAttribute('video-id') !== state.videoId) {
     homeMarker?.remove();
     return;
@@ -638,7 +615,6 @@ function restoreNode(node, homeMarker, kind, beforeNode = null) {
     homeMarker?.remove();
     return;
   }
-  // YouTube moved related itself (e.g. into the one-column layout): keep its position instead of the old marker.
   if (kind === 'related' && node.parentNode !== state.relatedPane) {
     if (node.isConnected && watch.contains(node) && !state.root?.contains(node)) {
       homeMarker?.remove();
@@ -716,14 +692,12 @@ function evaluate() {
     !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane)
   );
   const eligible = isEligible(watch);
-  // Fullscreen holds the panel instead of tearing it down; the same video and container are required.
   const holdFullscreen = Boolean(state.root && !wrongGeneration && !brokenRoot && isFullscreen(watch));
   if (holdFullscreen) holdForFullscreen();
   else if (wrongGeneration || brokenRoot || (state.root && !eligible)) teardown();
 
   if (!state.root && eligible) mount(watch);
   if (state.root) {
-    // Fullscreen ended in the two-column layout (otherwise teardown ran above).
     if (state.fullscreenHeld && !holdFullscreen) releaseFullscreenHold();
     syncReplacedComments();
     syncReplacedRelated();
@@ -736,10 +710,8 @@ function isInsideAdoptedContent(node) {
   return Boolean(state.commentsNode?.contains(node) || state.relatedNode?.contains(node));
 }
 
-// Player internals (time display, captions, tooltips) churn during playback but never affect the layout decision.
 const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || Boolean(node.closest?.('#movie_player, ytd-player'));
 
-// Off the watch page with no panel there is nothing to lay out or tear down.
 const isIdleOffWatch = () => !state.root && location.pathname !== '/watch';
 
 const onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
@@ -788,7 +760,6 @@ function onNavigateStart() {
 }
 
 function onFullscreenChange() {
-  // YouTube hides the right column while handling this same event; save the positions before that.
   if (document.fullscreenElement && state.root && state.videoId === readVideoId()) holdForFullscreen();
   scheduleEvaluation(0);
 }
@@ -813,7 +784,6 @@ function boot() {
   document.addEventListener('yt-navigate-start', onNavigateStart, true);
   document.addEventListener('yt-navigate-finish', () => scheduleEvaluation(0), true);
   document.addEventListener('yt-page-data-updated', () => scheduleEvaluation(0), true);
-  // Window capture runs before YouTube's own fullscreenchange listeners.
   window.addEventListener('fullscreenchange', onFullscreenChange, true);
   window.addEventListener('popstate', onUrlChanged, true);
   window.addEventListener('urlchange', onUrlChanged, true);

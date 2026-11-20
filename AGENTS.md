@@ -32,6 +32,7 @@
 - 새 기능이 페이지에 붙이는 id·클래스·CSS 변수는 `tubekit-<기능 id>-` 접두어를 쓴다. 오른쪽 댓글 패널은 예전부터 쓰던 `tubekit-` 접두어(`#tubekit-root`, `#tubekit-styles` 등)를 그대로 쓴다.
 - 번들러는 모듈의 최상위 이름을 한 범위로 합치므로, 다른 기능과 이름이 겹치면 `evaluate$1`처럼 바뀐다. 회귀 테스트가 `function evaluate() {`를 찾아 계측하므로 다른 기능에서 최상위 함수 이름 `evaluate`를 쓰지 않는다.
 - 헤더(`@match`, `@grant` 등)는 `vite.config.mjs`에서 고치고, `@version`은 `package.json`의 `version`에서 가져온다.
+- 코드(`src/`, `test/`, 설정 파일)에 주석을 쓰지 않는다. 빌드가 만드는 UserScript 헤더는 예외다.
 
 ## 동작 사양
 

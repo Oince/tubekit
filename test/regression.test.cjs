@@ -34,21 +34,18 @@ async function setup(t, {
   t.after(() => dom.window.close());
   const w = dom.window;
   w.innerWidth = innerWidth;
-  // jsdom has no layout engine: supply the supported two-column geometry.
   w.HTMLElement.prototype.getClientRects = function () { return [{}]; };
   w.HTMLElement.prototype.getBoundingClientRect = function () {
     return this.id === 'primary'
       ? primary
       : secondary;
   };
-  // Count evaluations without changing the production script's behavior.
   w.eval(script.replace('function evaluate() {', 'function evaluate() { window.evaluationCount = (window.evaluationCount || 0) + 1;'));
   await sleep(200);
   if (expectRoot) assert.ok(w.document.querySelector('#tubekit-root'));
   return { w, document: w.document, watch: w.document.querySelector('ytd-watch-flexy') };
 }
 
-// YouTube drops is-two-columns_ when it switches to the one-column layout.
 function collapseToOneColumn(w, document) {
   w.innerWidth = 800;
   document.querySelector('ytd-watch-flexy').removeAttribute('is-two-columns_');
@@ -74,8 +71,15 @@ function selected(document) {
   return document.querySelector('[role="tab"][aria-selected="true"]').dataset.tab;
 }
 
+const THEATER_ATTRIBUTES = ['theater', 'full-bleed-player'];
+
 async function theater(watch) {
-  watch.setAttribute('theater', '');
+  for (const name of THEATER_ATTRIBUTES) watch.setAttribute(name, '');
+  await sleep(200);
+}
+
+async function leaveTheater(watch) {
+  for (const name of THEATER_ATTRIBUTES) watch.removeAttribute(name);
   await sleep(200);
 }
 
@@ -345,7 +349,6 @@ test('panel root keeps a 14px scrollbar area regardless of the right column padd
   const proto = w.HTMLElement.prototype;
   Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? offset : 0; } });
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.classList.contains('tubekit-pane') ? 320 : 0; } });
-  // Scrollbar width 0 (overlay), 12 (narrower), 15 (Chrome), 17 (Safari).
   for (const padding of ['16px', '0px']) {
     document.querySelector('#secondary').style.paddingRight = padding;
     for (const [scrollbar, gutter, inset] of [[0, 14, 14], [12, 2, 14], [15, 0, 15], [17, 0, 17]]) {
@@ -379,8 +382,7 @@ test('selected tab survives leaving and re-entering the layout on the same video
   document.querySelector('#tubekit-related-tab').click();
   await theater(watch);
   assert.equal(document.querySelector('#tubekit-root'), null);
-  watch.removeAttribute('theater');
-  await sleep(200);
+  await leaveTheater(watch);
   assert.ok(document.querySelector('#tubekit-root'));
   assert.equal(selected(document), 'related');
 });
@@ -389,7 +391,6 @@ test('related moved by YouTube into the one-column layout stays before the resto
   const { w, document } = await setup(t);
   const comments = document.querySelector('#comments');
   const related = document.querySelector('#related');
-  // One-column YouTube puts related right before comments, which now live inside the panel.
   comments.before(related);
   collapseToOneColumn(w, document);
   await sleep(300);
@@ -400,7 +401,6 @@ test('related moved by YouTube into the one-column layout stays before the resto
   assert.equal(document.querySelectorAll('#related').length, 1);
   assert.equal(document.querySelectorAll('#comments').length, 1);
 
-  // Back to two columns: YouTube returns related to the secondary column and the panel is reapplied.
   w.innerWidth = 1440;
   document.querySelector('#secondary-inner').append(related);
   document.querySelector('ytd-watch-flexy').setAttribute('is-two-columns_', '');
@@ -616,8 +616,15 @@ test('panes do not contain fixed-position menus such as the comment sort dropdow
   const { document } = await setup(t);
   const css = document.getElementById('tubekit-styles').textContent;
   const pane = css.match(/\.tubekit-pane \{([^}]*)\}/)[1];
-  // Layout/paint containment makes the pane the containing block of the fixed sort dropdown and clips it at the pane edge.
   assert.doesNotMatch(pane, /\bcontain:/);
+});
+
+test('secondary column offsets its top with margin, not padding, so a short left column still keeps it level with the player', async t => {
+  const { document } = await setup(t);
+  const css = document.getElementById('tubekit-styles').textContent;
+  const rule = css.match(/ytd-watch-flexy #secondary \{([^}]*)\}/)[1];
+  assert.match(rule, /margin-top: 12px !important;/);
+  assert.match(rule, /padding-top: 0 !important;/);
 });
 
 function spyScrollTop(pane) {
@@ -636,6 +643,24 @@ test('re-selecting the same tab keeps the scroll position', async t => {
   const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
   comments.value = 300;
   document.querySelector('[role="tab"][data-tab="comments"]').click();
+  await raf();
+  await raf();
+  assert.equal(comments.value, 300);
+});
+
+test('a scroll event fired while a pane reappears does not change the position it is restored to', async t => {
+  const { w, document } = await setup(t);
+  const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
+  const commentsPane = document.querySelector('#tubekit-comments-pane');
+  const comments = spyScrollTop(commentsPane);
+  comments.value = 300;
+  commentsPane.dispatchEvent(new w.Event('scroll'));
+  document.querySelector('[role="tab"][data-tab="related"]').click();
+  await raf();
+  await raf();
+  comments.value = 0;
+  document.querySelector('[role="tab"][data-tab="comments"]').click();
+  commentsPane.dispatchEvent(new w.Event('scroll'));
   await raf();
   await raf();
   assert.equal(comments.value, 300);
@@ -671,7 +696,6 @@ test('scroll position survives opening and closing a special panel on both tabs'
 
 test('live streams with hidden comments beside the chat fall back to related', async t => {
   const { document } = await setup(t, { liveStream: true });
-  // Regular videos also start with hidden, empty comments; without a chat this is still loading.
   await sleep(3400);
   assert.equal(selected(document), 'comments');
   assert.ok(document.querySelector('#tubekit-comments-pane .tubekit-status'));
@@ -683,7 +707,6 @@ test('live streams with hidden comments beside the chat fall back to related', a
   assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'true');
   assert.equal(selected(document), 'related');
   assert.equal(document.querySelector('#tubekit-comments-pane .tubekit-status'), null);
-  // Closing the chat shows the panel again on related, not on the empty comments tab.
   chat.firstElementChild.setAttribute('collapsed', '');
   await sleep(200);
   assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
@@ -704,8 +727,6 @@ test('closing a live chat on a video with comments returns to the comments tab',
   assert.equal(selected(document), 'comments');
 });
 
-// Real YouTube fullscreen: the fullscreenchange listeners run while the panel is still laid out,
-// then YouTube marks the watch renderer and hides the columns, so every rect is empty and hidden panes read 0.
 function fullscreenStub(w, panes = {}) {
   const document = w.document;
   const watch = document.querySelector('ytd-watch-flexy');
@@ -714,19 +735,20 @@ function fullscreenStub(w, panes = {}) {
   const clientRects = proto.getClientRects;
   let element = null;
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => element });
+  const hideRightColumn = () => {
+    for (const name of ['fullscreen', 'full-bleed-player']) watch.setAttribute(name, '');
+    proto.getBoundingClientRect = () => ({ width: 0, left: 0, right: 0 });
+    proto.getClientRects = () => [];
+    Object.values(panes).forEach(pane => { pane.hidden = true; });
+  };
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) hideRightColumn();
+  }, true);
   return {
-    // late: YouTube hides the right column before any of our fullscreen handling runs.
-    enter({ late = false } = {}) {
-      const hide = () => {
-        for (const name of ['fullscreen', 'full-bleed-player']) watch.setAttribute(name, '');
-        proto.getBoundingClientRect = () => ({ width: 0, left: 0, right: 0 });
-        proto.getClientRects = () => [];
-        Object.values(panes).forEach(pane => { pane.hidden = true; });
-      };
-      if (late) hide();
+    enter({ hiddenBeforeEvent = false } = {}) {
+      if (hiddenBeforeEvent) hideRightColumn();
       element = document.documentElement;
       document.documentElement.dispatchEvent(new w.Event('fullscreenchange', { bubbles: true }));
-      if (!late) hide();
     },
     exit({ width = 1440, twoColumns = width >= 1000 } = {}) {
       element = null;
@@ -806,7 +828,7 @@ test('fullscreen noticed only after YouTube hid the right column still restores 
   const root = document.querySelector('#tubekit-root');
   const panes = await scrollBothTabs(w, document);
   const fullscreen = fullscreenStub(w, panes);
-  fullscreen.enter({ late: true });
+  fullscreen.enter({ hiddenBeforeEvent: true });
   await sleep(200);
   assert.equal(root.dataset.suspended, 'true');
   fullscreen.exit();
@@ -818,6 +840,20 @@ test('fullscreen noticed only after YouTube hid the right column still restores 
   document.querySelector('[role="tab"][data-tab="related"]').click();
   await frames(w);
   assert.equal(panes.related.value, 700);
+});
+
+test('fullscreen saves a position not yet reported by a scroll event before YouTube hides the right column in the same fullscreenchange', async t => {
+  const { w, document } = await setup(t);
+  const panes = await scrollBothTabs(w, document);
+  panes.comments.value = 450;
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  await sleep(200);
+  fullscreen.exit();
+  await sleep(200);
+  await frames(w);
+  assert.equal(selected(document), 'comments');
+  assert.equal(panes.comments.value, 450);
 });
 
 test('changing the video during fullscreen tears the panel down and mounts fresh after exit', async t => {
@@ -866,7 +902,6 @@ test('a YouTube panel open before fullscreen keeps the panel held after exit unt
   panes.comments.hidden = true;
   const fullscreen = fullscreenStub(w, panes);
   fullscreen.enter();
-  // The hidden right column makes the panel look closed during fullscreen.
   panel.setAttribute('hidden', '');
   panel.removeAttribute('hidden');
   await sleep(300);
@@ -902,7 +937,6 @@ test('a YouTube panel closed during fullscreen keeps its hold until exit, then r
   document.querySelector('#secondary-inner').append(panel);
   await sleep(200);
   assert.equal(root.dataset.suspended, 'true');
-  // A tab change while held marks whether the YouTube panel hold is released (it switches back to related).
   document.querySelector('[role="tab"][data-tab="comments"]').click();
   const fullscreen = fullscreenStub(w, panes);
   fullscreen.enter();
@@ -964,9 +998,8 @@ test('comments found off during fullscreen stay on related after exit', async t 
   assert.equal(panes.related.value, 700);
 });
 
-test('theater mode with full-bleed-player is not held like fullscreen', async t => {
+test('theater mode tears the panel down instead of holding it, although YouTube sets full-bleed-player there as in fullscreen', async t => {
   const { document, watch } = await setup(t);
-  watch.setAttribute('full-bleed-player', '');
   await theater(watch);
   assert.equal(document.querySelector('#tubekit-root'), null);
 });
@@ -1145,7 +1178,6 @@ test('max-quality: pause/resume and same-video media reloads do not re-apply; a 
   fire('playing');
   fire('playing');
   assert.equal(w.calls.length, 1);
-  // Quality change makes YouTube reload the media of the same video.
   fire('emptied');
   fire('loadstart');
   fire('playing');
@@ -1215,7 +1247,6 @@ test('max-quality: missing player API or empty data stays quiet', t => {
   assert.equal(b.w.calls.length, 0);
 });
 
-// 8K(highres)는 버퍼링이 심해 자동 선택 후보에서 제외되므로 첫 자동 선택은 hd2160이다.
 const HIGH_DATA = [
   { quality: 'highres', isPlayable: true, formatId: { itag: 1 } },
   { quality: 'hd2160', isPlayable: true, formatId: { itag: 2 } },

@@ -1,5 +1,3 @@
-// 4K(2160)까지의 가장 높은 화질로 자동 전환한다. 8K는 버퍼링이 심해 고르지 않는다(직접 고르는 것은 막지 않음).
-// 프리미엄(paygated) 포맷이 있으면 그쪽을 우선한다.
 const PLAYER_SELECTOR = '#movie_player';
 const QUALITY_HEIGHT = {
   highres: 4320,
@@ -13,10 +11,8 @@ const QUALITY_HEIGHT = {
   tiny: 144,
 };
 
-// 자동 선택이 고를 수 있는 최고 높이. 이보다 높은 화질(8K)은 건너뛴다.
 const MAX_HEIGHT = 2160;
 
-// 플레이어별로 마지막에 최고 화질을 적용한 영상 id. 같은 영상의 미디어 재로드(화질 변경 등)에는 다시 적용하지 않는다.
 const applied = new WeakMap();
 
 function pickBest(entries) {
@@ -32,7 +28,6 @@ function pickBest(entries) {
   return best;
 }
 
-// 적용을 시도했으면 true, 쓸 만한 화질 데이터가 없거나 API가 없으면 false.
 function applyMaxQuality(player) {
   try {
     if (typeof player.getAvailableQualityData !== 'function' || typeof player.setPlaybackQualityRange !== 'function') return false;
@@ -42,7 +37,6 @@ function applyMaxQuality(player) {
     else player.setPlaybackQualityRange(best.quality, best.quality);
     return true;
   } catch {
-    // 플레이어가 준비되지 않았거나 API가 바뀐 경우는 조용히 넘어간다.
     return false;
   }
 }
@@ -76,7 +70,6 @@ function start() {
   try {
     if (existing.getPlayerState() === 1) handlePlaying(existing);
   } catch {
-    // 아직 API가 없으면 다음 playing 이벤트에서 적용한다.
   }
 }
 

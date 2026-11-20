@@ -1,6 +1,7 @@
 export const SCRIPT_ID = 'tubekit';
-// Safari's overlay scrollbar, widened on hover, reaches 14px in from the panel's right edge (11px thumb + 3px inset).
-export const SCROLLBAR_AREA_WIDTH = 14;
+const SAFARI_OVERLAY_SCROLLBAR_HOVER_WIDTH = 11;
+const SAFARI_OVERLAY_SCROLLBAR_EDGE_INSET = 3;
+export const SCROLLBAR_AREA_WIDTH = SAFARI_OVERLAY_SCROLLBAR_HOVER_WIDTH + SAFARI_OVERLAY_SCROLLBAR_EDGE_INSET;
 export const COMMENTS_WAIT_MS = 20_000;
 export const LIVE_COMMENTS_GRACE_MS = 3_000;
 export const SCROLL_IDLE_MS = 150;
