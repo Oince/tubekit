@@ -1,4 +1,4 @@
-import { MIN_VIEWPORT_WIDTH, SCRIPT_ID } from './constants.js';
+import { SCRIPT_ID } from './constants.js';
 
 export function addStyles() {
   if (document.getElementById(`${SCRIPT_ID}-styles`)) return;
@@ -225,10 +225,8 @@ export function addStyles() {
       transform: translateY(0);
     }
 
-    @media (max-width: ${MIN_VIEWPORT_WIDTH - 1}px) {
-      #${SCRIPT_ID}-root {
-        display: none !important;
-      }
+    ytd-watch-flexy:not([is-two-columns_]) #${SCRIPT_ID}-root {
+      display: none !important;
     }
   `;
   (document.head || document.documentElement).appendChild(style);

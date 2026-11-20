@@ -1,4 +1,4 @@
-import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, LIVE_COMMENTS_GRACE_MS, MIN_VIEWPORT_WIDTH, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
+import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, LIVE_COMMENTS_GRACE_MS, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
 import { addStyles } from './styles.js';
 
 const state = {
@@ -94,8 +94,10 @@ function isFullscreen(watch) {
   return Boolean(document.fullscreenElement || watch?.hasAttribute('fullscreen'));
 }
 
+// YouTube decides the two-column layout itself (is-two-columns_), so no pixel threshold here:
+// the width where it switches differs between classic and overlay scrollbars.
 function isTwoColumnLayout(watch) {
-  if (!watch || innerWidth < MIN_VIEWPORT_WIDTH) return false;
+  if (!watch || !watch.hasAttribute('is-two-columns_')) return false;
 
   const primary = watch.querySelector(SELECTORS.primary);
   const secondary = watch.querySelector(SELECTORS.secondary);

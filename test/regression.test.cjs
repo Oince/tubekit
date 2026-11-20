@@ -11,6 +11,7 @@ async function setup(t, {
   disabled = false,
   disabledText = 'Comments are turned off',
   innerWidth = 1440,
+  twoColumns = true,
   primary = { width: 900, left: 0, right: 900 },
   secondary = { width: 400, left: 920, right: 1320 },
   expectRoot = true,
@@ -21,7 +22,7 @@ async function setup(t, {
     ? `<ytd-message-renderer>${disabledText}</ytd-message-renderer>`
     : liveStream ? '' : '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
   const dom = new JSDOM(`<html lang="en" ${htmlAttrs}><head></head><body><ytd-app>
-    <ytd-watch-flexy video-id="A"><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
+    <ytd-watch-flexy video-id="A"${twoColumns ? ' is-two-columns_' : ''}><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
       <ytd-comments id="comments"${liveStream ? ' hidden disable-upgrade' : ''}>${content}</ytd-comments>
     </div></div><div id="secondary"><div id="secondary-inner">
       <div id="related">related</div>
@@ -45,6 +46,12 @@ async function setup(t, {
   await sleep(200);
   if (expectRoot) assert.ok(w.document.querySelector('#tubekit-root'));
   return { w, document: w.document, watch: w.document.querySelector('ytd-watch-flexy') };
+}
+
+// YouTube drops is-two-columns_ when it switches to the one-column layout.
+function collapseToOneColumn(w, document) {
+  w.innerWidth = 800;
+  document.querySelector('ytd-watch-flexy').removeAttribute('is-two-columns_');
 }
 
 function newComments(document) {
@@ -81,18 +88,33 @@ test('iPad Pro 11-inch Sidecar landscape creates the panel at 1194px', async t =
   assert.ok(document.querySelector('#tubekit-root'));
 });
 
-test('two-column threshold of 1015px creates the panel', async t => {
+test('overlay scrollbar two-column layout below 1015px still creates the panel', async t => {
   const { document } = await setup(t, {
-    innerWidth: 1015,
+    innerWidth: 1014,
     primary: { width: 656, left: 16, right: 672 },
     secondary: { width: 336, left: 672, right: 1008 },
   });
   assert.ok(document.querySelector('#tubekit-root'));
 });
 
-test('viewport below 1015px does not create the panel', async t => {
-  const { document } = await setup(t, { innerWidth: 1014, expectRoot: false });
+test('one-column layout does not create the panel', async t => {
+  const { document } = await setup(t, { innerWidth: 999, twoColumns: false, expectRoot: false });
   assert.equal(document.querySelector('#tubekit-root'), null);
+});
+
+test('two-column attribute without side-by-side columns does not create the panel', async t => {
+  const { document } = await setup(t, {
+    secondary: { width: 400, left: 0, right: 400 },
+    expectRoot: false,
+  });
+  assert.equal(document.querySelector('#tubekit-root'), null);
+});
+
+test('CSS hides the panel while YouTube is not in the two-column layout', async t => {
+  const { document } = await setup(t);
+  const css = document.querySelector('#tubekit-styles').textContent;
+  assert.match(css, /ytd-watch-flexy:not\(\[is-two-columns_\]\) #tubekit-root\s*\{[^}]*display: none !important;/);
+  assert.doesNotMatch(css, /max-width: 1014px/);
 });
 
 test('idle DOM settles instead of repeatedly evaluating', async t => {
@@ -278,7 +300,7 @@ test('booting off the watch page ignores DOM changes, then builds the panel on /
   await sleep(400);
   assert.equal(w.evaluationCount || 0, count);
   w.history.pushState({}, '', '/watch?v=A');
-  app.innerHTML = `<ytd-watch-flexy video-id="A"><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
+  app.innerHTML = `<ytd-watch-flexy video-id="A" is-two-columns_><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
     <ytd-comments id="comments"><ytd-comments-header-renderer></ytd-comments-header-renderer></ytd-comments></div></div>
     <div id="secondary"><div id="secondary-inner"><div id="related">related</div></div></div></ytd-watch-flexy>`;
   document.dispatchEvent(new w.Event('yt-navigate-finish'));
@@ -369,7 +391,7 @@ test('related moved by YouTube into the one-column layout stays before the resto
   const related = document.querySelector('#related');
   // One-column YouTube puts related right before comments, which now live inside the panel.
   comments.before(related);
-  w.innerWidth = 800;
+  collapseToOneColumn(w, document);
   await sleep(300);
   assert.equal(document.querySelector('#tubekit-root'), null);
   assert.equal(document.querySelector('#below').children[0], related);
@@ -392,7 +414,7 @@ test('related moved outside the panel by YouTube is not pulled back into the hid
   const { w, document } = await setup(t);
   const related = document.querySelector('#related');
   document.querySelector('#below').append(related);
-  w.innerWidth = 800;
+  collapseToOneColumn(w, document);
   await sleep(300);
   assert.equal(document.querySelector('#tubekit-root'), null);
   assert.equal(document.querySelector('#below > #related'), related);
@@ -706,14 +728,15 @@ function fullscreenStub(w, panes = {}) {
       document.documentElement.dispatchEvent(new w.Event('fullscreenchange', { bubbles: true }));
       if (!late) hide();
     },
-    exit({ width = 1440 } = {}) {
+    exit({ width = 1440, twoColumns = width >= 1000 } = {}) {
       element = null;
       w.innerWidth = width;
+      if (!twoColumns) watch.removeAttribute('is-two-columns_');
       document.documentElement.dispatchEvent(new w.Event('fullscreenchange', { bubbles: true }));
       for (const name of ['fullscreen', 'full-bleed-player']) watch.removeAttribute(name);
       proto.getBoundingClientRect = rects;
       proto.getClientRects = clientRects;
-      if (width >= 1015) Object.values(panes).forEach(pane => { pane.hidden = false; });
+      if (twoColumns) Object.values(panes).forEach(pane => { pane.hidden = false; });
     },
   };
 }

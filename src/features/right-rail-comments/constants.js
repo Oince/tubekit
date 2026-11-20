@@ -1,5 +1,4 @@
 export const SCRIPT_ID = 'tubekit';
-export const MIN_VIEWPORT_WIDTH = 1015;
 // Safari's overlay scrollbar, widened on hover, reaches 14px in from the panel's right edge (11px thumb + 3px inset).
 export const SCROLLBAR_AREA_WIDTH = 14;
 export const COMMENTS_WAIT_MS = 20_000;
