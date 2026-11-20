@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.11
+// @version      0.6.12
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -348,6 +348,7 @@
 			related: 0
 		},
 		suspendedBy: null,
+		fullscreenHeld: false,
 		tabBeforeSpecialPanel: "comments",
 		lastTab: null,
 		mountTimeout: 0,
@@ -400,6 +401,9 @@
 	}
 	function isTheaterOrFullscreen(watch) {
 		return Boolean(document.fullscreenElement || watch?.hasAttribute("theater") || watch?.hasAttribute("fullscreen") || watch?.hasAttribute("full-bleed-player") || watch?.hasAttribute("miniplayer") || document.querySelector("ytd-miniplayer[active]"));
+	}
+	function isFullscreen(watch) {
+		return Boolean(document.fullscreenElement || watch?.hasAttribute("fullscreen"));
 	}
 	function isTwoColumnLayout(watch) {
 		if (!watch || innerWidth < 1015) return false;
@@ -484,18 +488,14 @@
 		commentsPane.dataset.tab = "comments";
 		commentsPane.setAttribute("role", "tabpanel");
 		commentsPane.setAttribute("aria-labelledby", `${SCRIPT_ID}-comments-tab`);
-		commentsPane.addEventListener("scroll", () => {
-			state.lastPaneScrollAt = performance.now();
-		}, { passive: true });
+		commentsPane.addEventListener("scroll", recordPaneScroll, { passive: true });
 		const relatedPane = document.createElement("div");
 		relatedPane.id = `${SCRIPT_ID}-related-pane`;
 		relatedPane.className = `${SCRIPT_ID}-pane`;
 		relatedPane.dataset.tab = "related";
 		relatedPane.setAttribute("role", "tabpanel");
 		relatedPane.setAttribute("aria-labelledby", `${SCRIPT_ID}-related-tab`);
-		relatedPane.addEventListener("scroll", () => {
-			state.lastPaneScrollAt = performance.now();
-		}, { passive: true });
+		relatedPane.addEventListener("scroll", recordPaneScroll, { passive: true });
 		const toast = document.createElement("div");
 		toast.id = `${SCRIPT_ID}-toast`;
 		toast.setAttribute("role", "status");
@@ -518,9 +518,20 @@
 		const label = `${text.comments} / ${text.related}`;
 		if (state.root.getAttribute("aria-label") !== label) state.root.setAttribute("aria-label", label);
 	}
+	function isHidden() {
+		return state.root?.dataset.suspended === "true";
+	}
+	function isPaneShown(pane) {
+		return Boolean(pane) && !isHidden() && pane.getClientRects().length > 0;
+	}
 	function saveActiveScrollTop() {
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
-		if (pane) state.scrollTop[state.activeTab] = pane.scrollTop;
+		if (isPaneShown(pane)) state.scrollTop[state.activeTab] = pane.scrollTop;
+	}
+	function recordPaneScroll(event) {
+		state.lastPaneScrollAt = performance.now();
+		const pane = event.currentTarget;
+		if (isPaneShown(pane)) state.scrollTop[pane.dataset.tab] = pane.scrollTop;
 	}
 	function syncScrollbarInsets() {
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
@@ -548,9 +559,10 @@
 		});
 		const activePane = tabName === "comments" ? state.commentsPane : state.relatedPane;
 		const generation = state.generation;
+		const target = options.reset ? 0 : state.scrollTop[tabName];
 		requestAnimationFrame(() => {
 			if (generation !== state.generation || !activePane?.isConnected || state.activeTab !== tabName) return;
-			activePane.scrollTop = options.reset ? 0 : state.scrollTop[tabName];
+			activePane.scrollTop = target;
 			activePane.dispatchEvent(new Event("scroll"));
 			syncScrollbarInsets();
 		});
@@ -708,26 +720,43 @@
 			return (panel.getAttribute("target-id") || "") !== "engagement-panel-comments-section" && panel.getClientRects().length > 0;
 		}) ? "engagement" : null;
 	}
+	function applySuspended() {
+		const held = Boolean(state.suspendedBy || state.fullscreenHeld);
+		document.documentElement.classList.toggle(`${SCRIPT_ID}-suspended`, held);
+		if (state.root && state.root.dataset.suspended !== String(held)) state.root.dataset.suspended = String(held);
+	}
 	function syncSpecialPanel() {
-		if (!state.root) return;
+		if (!state.root || state.fullscreenHeld) return;
 		const special = detectSpecialPanel();
-		document.documentElement.classList.toggle(`${SCRIPT_ID}-suspended`, Boolean(special));
 		if (special && !state.suspendedBy) {
 			state.tabBeforeSpecialPanel = state.activeTab;
-			state.suspendedBy = special;
 			saveActiveScrollTop();
-			state.root.dataset.suspended = "true";
+			state.suspendedBy = special;
+			applySuspended();
 			return;
 		}
 		if (!special && state.suspendedBy) {
 			const previous = state.suspendedBy;
 			state.suspendedBy = null;
-			state.root.dataset.suspended = "false";
+			applySuspended();
 			const chatTab = state.activeTab === "related" ? "related" : "comments";
 			switchTab(previous === "chat" ? chatTab : state.tabBeforeSpecialPanel, { keepSaved: true });
 			return;
 		}
 		if (special && special !== state.suspendedBy) state.suspendedBy = special;
+		applySuspended();
+	}
+	function holdForFullscreen() {
+		if (!state.root || state.fullscreenHeld) return;
+		saveActiveScrollTop();
+		state.fullscreenHeld = true;
+		applySuspended();
+	}
+	function releaseFullscreenHold() {
+		const heldBySpecialPanel = Boolean(state.suspendedBy);
+		state.fullscreenHeld = false;
+		syncSpecialPanel();
+		if (!heldBySpecialPanel && !state.suspendedBy) switchTab(state.activeTab, { keepSaved: true });
 	}
 	function observeSpecialPanels() {
 		state.specialObserver?.disconnect();
@@ -764,7 +793,7 @@
 		if (!state.root?.isConnected || !state.relatedPane) return;
 		const replacement = findNativeRelated(state.watch);
 		if (!replacement) return;
-		const savedScrollTop = state.activeTab === "related" ? state.relatedPane.scrollTop : state.scrollTop.related;
+		const savedScrollTop = state.activeTab === "related" && isPaneShown(state.relatedPane) ? state.relatedPane.scrollTop : state.scrollTop.related;
 		if (state.relatedNode !== replacement && state.relatedNode?.parentElement === state.relatedPane) state.relatedNode.remove();
 		state.relatedPane.appendChild(replacement);
 		state.relatedNode = replacement;
@@ -792,6 +821,7 @@
 		};
 		state.commentsReady = false;
 		state.suspendedBy = null;
+		state.fullscreenHeld = false;
 		state.tabBeforeSpecialPanel = "comments";
 		const root = buildRoot();
 		state.relatedMarker = marker("related-home");
@@ -847,8 +877,7 @@
 			videoId: state.videoId,
 			tab: state.activeTab
 		};
-		if (state.commentsPane) state.scrollTop.comments = state.commentsPane.scrollTop;
-		if (state.relatedPane) state.scrollTop.related = state.relatedPane.scrollTop;
+		saveActiveScrollTop();
 		const relatedBeforeComments = state.relatedNode && state.relatedNode.nextElementSibling === state.commentsNode ? state.commentsNode : null;
 		restoreNode(state.commentsNode, state.commentsMarker, "comments");
 		restoreNode(state.relatedNode, state.relatedMarker, "related", relatedBeforeComments);
@@ -867,6 +896,7 @@
 		state.videoId = null;
 		state.watch = null;
 		state.suspendedBy = null;
+		state.fullscreenHeld = false;
 	}
 	function evaluate() {
 		addStyles();
@@ -876,9 +906,12 @@
 		const wrongGeneration = state.root && (state.watch !== watch || state.videoId !== nextVideoId || !watchMatchesUrl(watch));
 		const brokenRoot = state.root && (!state.root.isConnected || state.root.parentNode !== watch?.querySelector(SELECTORS.secondaryInner) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane));
 		const eligible = isEligible(watch);
-		if (wrongGeneration || brokenRoot || state.root && !eligible) teardown();
+		const holdFullscreen = Boolean(state.root && !wrongGeneration && !brokenRoot && isFullscreen(watch));
+		if (holdFullscreen) holdForFullscreen();
+		else if (wrongGeneration || brokenRoot || state.root && !eligible) teardown();
 		if (!state.root && eligible) mount(watch);
 		if (state.root) {
+			if (state.fullscreenHeld && !holdFullscreen) releaseFullscreenHold();
 			syncReplacedComments();
 			syncReplacedRelated();
 			syncSpecialPanel();
@@ -931,6 +964,10 @@
 		state.lastTab = null;
 		scheduleEvaluation(150);
 	}
+	function onFullscreenChange() {
+		if (document.fullscreenElement && state.root && state.videoId === readVideoId()) holdForFullscreen();
+		scheduleEvaluation(0);
+	}
 	function onUrlChanged() {
 		const nextVideoId = readVideoId();
 		if (state.root && state.videoId !== nextVideoId) teardown();
@@ -952,7 +989,7 @@
 		document.addEventListener("yt-navigate-start", onNavigateStart, true);
 		document.addEventListener("yt-navigate-finish", () => scheduleEvaluation(0), true);
 		document.addEventListener("yt-page-data-updated", () => scheduleEvaluation(0), true);
-		document.addEventListener("fullscreenchange", () => scheduleEvaluation(0), true);
+		window.addEventListener("fullscreenchange", onFullscreenChange, true);
 		window.addEventListener("popstate", onUrlChanged, true);
 		window.addEventListener("urlchange", onUrlChanged, true);
 		window.addEventListener("resize", () => scheduleEvaluation(180), { passive: true });

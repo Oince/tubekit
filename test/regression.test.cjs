@@ -539,7 +539,7 @@ test('mutations outside the player still trigger evaluation', async t => {
   assert.ok(w.evaluationCount > count);
 });
 
-test('scroll events do not read scrollTop and tab switching restores each position', async t => {
+test('scroll events record the shown pane position and tab switching restores each position', async t => {
   const { w, document } = await setup(t);
   const spy = pane => {
     const spyState = { reads: 0, value: 0 };
@@ -557,11 +557,8 @@ test('scroll events do not read scrollTop and tab switching restores each positi
   const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
 
   comments.value = 300;
-  comments.reads = 0;
   commentsPane.dispatchEvent(new w.Event('scroll'));
-  relatedPane.dispatchEvent(new w.Event('scroll'));
-  assert.equal(comments.reads, 0);
-  assert.equal(related.reads, 0);
+  assert.ok(comments.reads > 0, 'the shown pane position is recorded on scroll');
 
   const tab = name => document.querySelector(`[role="tab"][data-tab="${name}"]`);
   tab('related').click();
@@ -683,6 +680,272 @@ test('closing a live chat on a video with comments returns to the comments tab',
   await sleep(200);
   assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
   assert.equal(selected(document), 'comments');
+});
+
+// Real YouTube fullscreen: the fullscreenchange listeners run while the panel is still laid out,
+// then YouTube marks the watch renderer and hides the columns, so every rect is empty and hidden panes read 0.
+function fullscreenStub(w, panes = {}) {
+  const document = w.document;
+  const watch = document.querySelector('ytd-watch-flexy');
+  const proto = w.HTMLElement.prototype;
+  const rects = proto.getBoundingClientRect;
+  const clientRects = proto.getClientRects;
+  let element = null;
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => element });
+  return {
+    // late: YouTube hides the right column before any of our fullscreen handling runs.
+    enter({ late = false } = {}) {
+      const hide = () => {
+        for (const name of ['fullscreen', 'full-bleed-player']) watch.setAttribute(name, '');
+        proto.getBoundingClientRect = () => ({ width: 0, left: 0, right: 0 });
+        proto.getClientRects = () => [];
+        Object.values(panes).forEach(pane => { pane.hidden = true; });
+      };
+      if (late) hide();
+      element = document.documentElement;
+      document.documentElement.dispatchEvent(new w.Event('fullscreenchange', { bubbles: true }));
+      if (!late) hide();
+    },
+    exit({ width = 1440 } = {}) {
+      element = null;
+      w.innerWidth = width;
+      document.documentElement.dispatchEvent(new w.Event('fullscreenchange', { bubbles: true }));
+      for (const name of ['fullscreen', 'full-bleed-player']) watch.removeAttribute(name);
+      proto.getBoundingClientRect = rects;
+      proto.getClientRects = clientRects;
+      if (width >= 1015) Object.values(panes).forEach(pane => { pane.hidden = false; });
+    },
+  };
+}
+
+async function scrollBothTabs(w, document, positions = { comments: 300, related: 700 }) {
+  const raf = () => new Promise(resolve => w.requestAnimationFrame(resolve));
+  const panes = {
+    comments: spyScrollTop(document.querySelector('#tubekit-comments-pane')),
+    related: spyScrollTop(document.querySelector('#tubekit-related-pane')),
+  };
+  for (const tab of ['related', 'comments']) {
+    document.querySelector(`[role="tab"][data-tab="${tab}"]`).click();
+    await raf();
+    await raf();
+    panes[tab].value = positions[tab];
+    document.querySelector(`#tubekit-${tab}-pane`).dispatchEvent(new w.Event('scroll'));
+  }
+  return panes;
+}
+
+const frames = async w => {
+  for (let i = 0; i < 2; i++) await new Promise(resolve => w.requestAnimationFrame(resolve));
+};
+
+test('fullscreen holds the panel and restores the tab and both scroll positions on exit', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs(w, document);
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  await sleep(200);
+  assert.equal(document.querySelector('#tubekit-root'), root);
+  assert.equal(root.dataset.suspended, 'true');
+  assert.ok(document.documentElement.classList.contains('tubekit-suspended'));
+  fullscreen.exit();
+  await sleep(200);
+  await frames(w);
+  assert.equal(document.querySelector('#tubekit-root'), root, 'not torn down');
+  assert.equal(root.dataset.suspended, 'false');
+  assert.equal(document.documentElement.classList.contains('tubekit-suspended'), false);
+  assert.equal(selected(document), 'comments');
+  assert.equal(panes.comments.value, 300);
+  document.querySelector('[role="tab"][data-tab="related"]').click();
+  await frames(w);
+  assert.equal(panes.related.value, 700);
+});
+
+test('fullscreen keeps the related tab and its scroll position', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs(w, document);
+  document.querySelector('[role="tab"][data-tab="related"]').click();
+  await frames(w);
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  await sleep(200);
+  fullscreen.exit();
+  await sleep(200);
+  await frames(w);
+  assert.equal(document.querySelector('#tubekit-root'), root, 'not torn down');
+  assert.equal(selected(document), 'related');
+  assert.equal(panes.related.value, 700);
+});
+
+test('fullscreen noticed only after YouTube hid the right column still restores the active tab position', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs(w, document);
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter({ late: true });
+  await sleep(200);
+  assert.equal(root.dataset.suspended, 'true');
+  fullscreen.exit();
+  await sleep(200);
+  await frames(w);
+  assert.equal(document.querySelector('#tubekit-root'), root);
+  assert.equal(selected(document), 'comments');
+  assert.equal(panes.comments.value, 300);
+  document.querySelector('[role="tab"][data-tab="related"]').click();
+  await frames(w);
+  assert.equal(panes.related.value, 700);
+});
+
+test('changing the video during fullscreen tears the panel down and mounts fresh after exit', async t => {
+  const { w, document, watch } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const fullscreen = fullscreenStub(w);
+  fullscreen.enter();
+  await sleep(200);
+  document.dispatchEvent(new w.Event('yt-navigate-start'));
+  w.history.pushState({}, '', '/watch?v=B');
+  watch.setAttribute('video-id', 'B');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  await sleep(300);
+  assert.equal(document.querySelector('#tubekit-root'), null);
+  fullscreen.exit();
+  await sleep(300);
+  const fresh = document.querySelector('#tubekit-root');
+  assert.ok(fresh);
+  assert.notEqual(fresh, root);
+  assert.notEqual(fresh.dataset.suspended, 'true');
+  assert.equal(selected(document), 'comments');
+});
+
+test('fullscreen ending outside the two-column layout tears the panel down', async t => {
+  const { w, document } = await setup(t);
+  const comments = document.querySelector('#comments');
+  const fullscreen = fullscreenStub(w);
+  fullscreen.enter();
+  await sleep(200);
+  fullscreen.exit({ width: 800 });
+  await sleep(300);
+  assert.equal(document.querySelector('#tubekit-root'), null);
+  assert.equal(document.querySelector('#below #comments'), comments);
+  assert.equal(document.documentElement.classList.contains('tubekit-suspended'), false);
+});
+
+test('a YouTube panel open before fullscreen keeps the panel held after exit until it closes', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs(w, document);
+  const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
+  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+  document.querySelector('#secondary-inner').append(panel);
+  await sleep(200);
+  assert.equal(root.dataset.suspended, 'true');
+  panes.comments.hidden = true;
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  // The hidden right column makes the panel look closed during fullscreen.
+  panel.setAttribute('hidden', '');
+  panel.removeAttribute('hidden');
+  await sleep(300);
+  assert.equal(document.querySelector('#tubekit-root'), root);
+  assert.equal(root.dataset.suspended, 'true');
+  fullscreen.exit();
+  panes.comments.hidden = true;
+  await sleep(300);
+  assert.equal(document.querySelector('#tubekit-root'), root);
+  assert.equal(root.dataset.suspended, 'true', 'still held by the YouTube panel');
+  panel.remove();
+  await sleep(200);
+  panes.comments.hidden = false;
+  await frames(w);
+  assert.equal(root.dataset.suspended, 'false');
+  assert.equal(selected(document), 'comments');
+  assert.equal(panes.comments.value, 300);
+});
+
+function expandedPanel(document) {
+  const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
+  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+  return panel;
+}
+
+test('a YouTube panel closed during fullscreen keeps its hold until exit, then restores the tab before it', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs(w, document);
+  document.querySelector('[role="tab"][data-tab="related"]').click();
+  await frames(w);
+  const panel = expandedPanel(document);
+  document.querySelector('#secondary-inner').append(panel);
+  await sleep(200);
+  assert.equal(root.dataset.suspended, 'true');
+  // A tab change while held marks whether the YouTube panel hold is released (it switches back to related).
+  document.querySelector('[role="tab"][data-tab="comments"]').click();
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  panel.setAttribute('hidden', '');
+  await sleep(300);
+  assert.equal(selected(document), 'comments', 'the YouTube panel hold is kept during fullscreen');
+  panel.remove();
+  await sleep(300);
+  assert.equal(selected(document), 'comments', 'closing the YouTube panel is not handled during fullscreen');
+  assert.equal(root.dataset.suspended, 'true');
+  fullscreen.exit();
+  await sleep(200);
+  await frames(w);
+  assert.equal(document.querySelector('#tubekit-root'), root);
+  assert.equal(root.dataset.suspended, 'false');
+  assert.equal(selected(document), 'related', 'restored to the tab before the YouTube panel');
+  assert.equal(panes.related.value, 700);
+});
+
+test('a YouTube panel opened during fullscreen holds the panel after exit until it closes', async t => {
+  const { w, document } = await setup(t);
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs(w, document);
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  await sleep(200);
+  const panel = expandedPanel(document);
+  document.querySelector('#secondary-inner').append(panel);
+  await sleep(300);
+  assert.equal(root.dataset.suspended, 'true');
+  fullscreen.exit();
+  panes.comments.hidden = true;
+  await sleep(300);
+  assert.equal(document.querySelector('#tubekit-root'), root);
+  assert.equal(root.dataset.suspended, 'true', 'held by the YouTube panel after fullscreen');
+  panel.remove();
+  await sleep(200);
+  panes.comments.hidden = false;
+  await frames(w);
+  assert.equal(root.dataset.suspended, 'false');
+  assert.equal(selected(document), 'comments');
+  assert.equal(panes.comments.value, 300);
+});
+
+test('comments found off during fullscreen stay on related after exit', async t => {
+  const { w, document } = await setup(t);
+  const panes = await scrollBothTabs(w, document);
+  const fullscreen = fullscreenStub(w, panes);
+  fullscreen.enter();
+  await sleep(100);
+  document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
+  await sleep(1300);
+  assert.equal(selected(document), 'related');
+  fullscreen.exit();
+  await sleep(200);
+  await frames(w);
+  assert.equal(document.querySelector('#tubekit-root').dataset.suspended, 'false');
+  assert.equal(selected(document), 'related');
+  assert.equal(panes.related.value, 700);
+});
+
+test('theater mode with full-bleed-player is not held like fullscreen', async t => {
+  const { document, watch } = await setup(t);
+  watch.setAttribute('full-bleed-player', '');
+  await theater(watch);
+  assert.equal(document.querySelector('#tubekit-root'), null);
 });
 
 function shortsPage(t, url) {
