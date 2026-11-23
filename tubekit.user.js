@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.7.1
+// @version      0.7.2
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -1053,7 +1053,7 @@
 	var STYLE_ID = `${PREFIX}-styles`;
 	var PLAYING = ":not(.ad-showing):not(.ad-interrupting)";
 	var player = (angle) => `#movie_player.${PREFIX}-${angle}${PLAYING}`;
-	var video = (angle) => `${player(angle)} video.html5-main-video`;
+	var video = (angle) => `${player(angle)}:not(.ended-mode) video.html5-main-video`;
 	var storyboard = (angle) => `${player(angle)} .ytp-tooltip-bg[style*="/sb/"]`;
 	var css = `
   ${video(90)}, ${video(270)} {

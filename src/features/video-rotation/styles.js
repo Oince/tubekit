@@ -3,7 +3,7 @@ export const PREFIX = 'tubekit-video-rotation';
 const STYLE_ID = `${PREFIX}-styles`;
 const PLAYING = ':not(.ad-showing):not(.ad-interrupting)';
 const player = angle => `#movie_player.${PREFIX}-${angle}${PLAYING}`;
-const video = angle => `${player(angle)} video.html5-main-video`;
+const video = angle => `${player(angle)}:not(.ended-mode) video.html5-main-video`;
 const storyboard = angle => `${player(angle)} .ytp-tooltip-bg[style*="/sb/"]`;
 
 const css = `

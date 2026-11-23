@@ -1651,6 +1651,21 @@ test('video-rotation: the button comes back after YouTube replaces the controls 
   assert.equal(late.button().length, 1);
 });
 
+test('video-rotation: an ended video is left where YouTube hides it so its last frame does not show behind the end screen', t => {
+  const { document, player, button } = rotationPage(t);
+  const video = document.querySelector('video');
+  const sheet = document.querySelector('#tubekit-video-rotation-styles').sheet;
+  const videoRules = () => [...sheet.cssRules].filter(rule => rule.selectorText && rule.selectorText.split(',').some(selector => video.matches(selector)));
+  for (const angle of [90, 180, 270]) {
+    button()[0].click();
+    assert.ok(player.classList.contains(`tubekit-video-rotation-${angle}`));
+    assert.ok(videoRules().length > 0, `${angle}° rotates the playing video`);
+    player.classList.add('ended-mode');
+    assert.deepEqual(videoRules(), [], `${angle}° leaves the ended video alone`);
+    player.classList.remove('ended-mode');
+  }
+});
+
 test('video-rotation: embeds, shorts and other non-watch pages get no rotation styles', async t => {
   for (const url of [
     'https://www.youtube.com/embed/abcdefghijk',
