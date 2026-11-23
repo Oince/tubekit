@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.6.13
+// @version      0.7.0
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -70,7 +70,7 @@
 		if (!target || target.tagName !== "VIDEO" || typeof target.closest !== "function") return null;
 		return target.closest(PLAYER_SELECTOR);
 	}
-	function start$1() {
+	function start$2() {
 		document.addEventListener("playing", (event) => {
 			const player = playerOf(event);
 			if (player) handlePlaying(player);
@@ -84,7 +84,7 @@
 	var max_quality_default = {
 		id: "max-quality",
 		frames: true,
-		start: start$1
+		start: start$2
 	};
 	var SCRIPT_ID = "tubekit";
 	var SELECTORS = {
@@ -1037,7 +1037,7 @@
 		detail.endpoint = watch.endpoint;
 		if ("href" in detail) detail.href = `/watch?v=${watch.id}`;
 	}
-	function start() {
+	function start$1() {
 		redirectIfShorts();
 		document.addEventListener("yt-navigate", rewriteEndpoint, true);
 		document.addEventListener("yt-navigate-finish", redirectIfShorts);
@@ -1045,13 +1045,450 @@
 		window.addEventListener("navigate", rewriteEndpoint, true);
 		window.addEventListener("state-navigateend", redirectIfShorts);
 	}
+	var shorts_to_watch_default = {
+		id: "shorts-to-watch",
+		start: start$1
+	};
+	var PREFIX = "tubekit-video-rotation";
+	var STYLE_ID = `${PREFIX}-styles`;
+	var PLAYING = ":not(.ad-showing):not(.ad-interrupting)";
+	var player = (angle) => `#movie_player.${PREFIX}-${angle}${PLAYING}`;
+	var video = (angle) => `${player(angle)} video.html5-main-video`;
+	var storyboard = (angle) => `${player(angle)} .ytp-tooltip-bg[style*="/sb/"]`;
+	var css = `
+  ${video(90)}, ${video(270)} {
+    left: var(--${PREFIX}-left) !important;
+    top: var(--${PREFIX}-top) !important;
+    width: var(--${PREFIX}-width) !important;
+    height: var(--${PREFIX}-height) !important;
+    transform: none !important;
+  }
+  ${video(90)} { rotate: 90deg !important; }
+  ${video(180)} { rotate: 180deg !important; }
+  ${video(270)} { rotate: 270deg !important; }
+  ${storyboard(90)} { transform: rotate(90deg) scale(var(--${PREFIX}-preview-scale, 1)) !important; }
+  ${storyboard(180)} { transform: rotate(180deg) !important; }
+  ${storyboard(270)} { transform: rotate(270deg) scale(var(--${PREFIX}-preview-scale, 1)) !important; }
+  ${storyboard(90)}, ${storyboard(270)} {
+    box-shadow: 0 0 0 calc(1px / var(--${PREFIX}-preview-scale, 1)) #fff !important;
+  }
+  ${player(90)} .ytp-tooltip:has(> .ytp-tooltip-bg[style*="/sb/"]),
+  ${player(270)} .ytp-tooltip:has(> .ytp-tooltip-bg[style*="/sb/"]) {
+    background-color: transparent !important;
+  }
+  #movie_player.ad-showing .${PREFIX}-button,
+  #movie_player.ad-interrupting .${PREFIX}-button {
+    display: none !important;
+  }
+`;
+	function addRotationStyles() {
+		if (document.getElementById(STYLE_ID)) return;
+		const parent = document.head || document.documentElement;
+		if (!parent) return;
+		const style = document.createElement("style");
+		style.id = STYLE_ID;
+		style.textContent = css;
+		parent.appendChild(style);
+	}
+	var SVG_NS = "http://www.w3.org/2000/svg";
+	var LABEL = "영상 회전";
+	var BUTTON_CLASS = `${PREFIX}-button`;
+	var ANGLES = [
+		90,
+		180,
+		270
+	];
+	var STRETCH = "yt:stretch=";
+	var BOX_PROPERTIES = [
+		"left",
+		"top",
+		"width",
+		"height"
+	];
+	var TOOLTIP_GAP = 11;
+	var rotation = {
+		angle: 0,
+		videoId: null,
+		originalRatio: NaN,
+		originalKeywords: [],
+		stretched: false,
+		cleanupPending: false,
+		ad: false,
+		player: null,
+		playerObserver: null,
+		video: null,
+		videoObserver: null,
+		controls: null,
+		controlsObserver: null,
+		boxFrame: 0,
+		relayoutFrame: 0,
+		relayoutPending: false,
+		tooltip: null
+	};
+	function onWatchPage() {
+		return location.hostname === "www.youtube.com" && location.pathname === "/watch";
+	}
+	function onExcludedPage() {
+		return /^\/(embed|shorts|live_chat)(\/|$)/.test(location.pathname);
+	}
+	function readUrlVideoId() {
+		try {
+			return new URL(location.href).searchParams.get("v") || null;
+		} catch {
+			return null;
+		}
+	}
+	function findPlayer() {
+		return document.getElementById("movie_player");
+	}
+	function isAdShowing(player) {
+		return player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
+	}
+	function isQuarterTurn() {
+		return rotation.angle % 180 === 90;
+	}
+	function readPlayerVideoId(player) {
+		try {
+			return player.getVideoData().video_id || null;
+		} catch {
+			return null;
+		}
+	}
+	function readAspectRatio(player) {
+		try {
+			const ratio = Number(player.getVideoAspectRatio());
+			return Number.isFinite(ratio) && ratio > 0 ? ratio : NaN;
+		} catch {
+			return NaN;
+		}
+	}
+	function currentVideoId(player) {
+		if (onWatchPage()) return readUrlVideoId();
+		return rotation.ad ? null : readPlayerVideoId(player);
+	}
+	function playerShowsCurrentVideo(player) {
+		if (readPlayerVideoId(player) !== rotation.videoId) return false;
+		try {
+			const responseId = player.getPlayerResponse()?.videoDetails?.videoId;
+			return !responseId || responseId === rotation.videoId;
+		} catch {
+			return true;
+		}
+	}
+	function readKeywords(player) {
+		try {
+			const keywords = player.getPlayerResponse().videoDetails.keywords;
+			return Array.isArray(keywords) ? keywords.filter((keyword) => typeof keyword === "string") : [];
+		} catch {
+			return [];
+		}
+	}
+	function keywordsWithStretch(value) {
+		const original = rotation.originalKeywords;
+		const rest = original.filter((keyword) => !keyword.startsWith(STRETCH));
+		const own = original.find((keyword) => keyword.startsWith(STRETCH));
+		return [...rest, value === null ? own || STRETCH : `${STRETCH}${value}`].join(",");
+	}
+	function nearlyEqual(a, b) {
+		return Math.abs(a - b) <= Math.max(a, b) * 1e-6;
+	}
+	function createIcon() {
+		const svg = document.createElementNS(SVG_NS, "svg");
+		svg.setAttribute("fill", "none");
+		svg.setAttribute("height", "24");
+		svg.setAttribute("viewBox", "0 0 24 24");
+		svg.setAttribute("width", "24");
+		const stroke = {
+			stroke: "white",
+			"stroke-width": "2",
+			"stroke-linecap": "round",
+			"stroke-linejoin": "round"
+		};
+		for (const [tag, attributes] of [
+			["rect", {
+				x: "3.2",
+				y: "7",
+				width: "10.5",
+				height: "13",
+				rx: "1.5"
+			}],
+			["path", { d: "M13.2 2.5A7.5 7.5 0 0 1 20.7 10" }],
+			["path", { d: "M18.4 7.9L20.7 10.2L23 7.9" }]
+		]) {
+			const shape = document.createElementNS(SVG_NS, tag);
+			for (const [name, value] of Object.entries({
+				...attributes,
+				...stroke
+			})) shape.setAttribute(name, value);
+			svg.appendChild(shape);
+		}
+		return svg;
+	}
+	function createButton() {
+		const button = document.createElement("button");
+		button.className = `ytp-button ${BUTTON_CLASS}`;
+		button.setAttribute("aria-label", LABEL);
+		button.setAttribute("data-tooltip-title", LABEL);
+		button.setAttribute("data-title-no-tooltip", LABEL);
+		button.appendChild(createIcon());
+		button.addEventListener("click", rotateClockwise);
+		button.addEventListener("click", hideTooltip);
+		button.addEventListener("mouseenter", showTooltip);
+		button.addEventListener("focus", showTooltip);
+		button.addEventListener("mouseleave", hideTooltip);
+		button.addEventListener("blur", hideTooltip);
+		return button;
+	}
+	function createTooltip() {
+		const tooltip = document.createElement("div");
+		tooltip.className = `ytp-tooltip ytp-bottom ${PREFIX}-tooltip`;
+		tooltip.setAttribute("aria-hidden", "true");
+		const wrapper = document.createElement("div");
+		wrapper.className = "ytp-tooltip-text-wrapper";
+		wrapper.setAttribute("aria-hidden", "true");
+		const bottom = document.createElement("div");
+		bottom.className = "ytp-tooltip-bottom-text";
+		const text = document.createElement("span");
+		text.className = "ytp-tooltip-text";
+		text.textContent = LABEL;
+		bottom.appendChild(text);
+		wrapper.appendChild(bottom);
+		tooltip.appendChild(wrapper);
+		return tooltip;
+	}
+	function showTooltip(event) {
+		const button = event.currentTarget;
+		const player = button.closest("#movie_player");
+		if (!player || button.disabled) return;
+		if (!rotation.tooltip) rotation.tooltip = createTooltip();
+		const tooltip = rotation.tooltip;
+		if (tooltip.parentElement !== player) player.appendChild(tooltip);
+		const playerRect = player.getBoundingClientRect();
+		const buttonRect = button.getBoundingClientRect();
+		const chrome = player.querySelector(".ytp-chrome-bottom");
+		const anchorTop = chrome ? chrome.getBoundingClientRect().top : buttonRect.top;
+		const width = tooltip.offsetWidth;
+		const centered = buttonRect.left - playerRect.left + buttonRect.width / 2 - width / 2;
+		tooltip.style.left = `${Math.min(Math.max(centered, 12), playerRect.width - width - 12)}px`;
+		tooltip.style.top = `${Math.round(anchorTop - playerRect.top - TOOLTIP_GAP - tooltip.offsetHeight)}px`;
+		tooltip.removeAttribute("aria-hidden");
+	}
+	function hideTooltip() {
+		rotation.tooltip?.setAttribute("aria-hidden", "true");
+	}
+	function ensureButton(player) {
+		const settings = player.querySelector(".ytp-right-controls-left .ytp-settings-button") || player.querySelector(".ytp-right-controls .ytp-settings-button");
+		if (!settings) {
+			observeControls(player.querySelector(".ytp-chrome-bottom") || player);
+			return;
+		}
+		const buttons = [...document.querySelectorAll(`.${BUTTON_CLASS}`)];
+		const button = buttons.find((node) => player.contains(node)) || createButton();
+		for (const extra of buttons) if (extra !== button) extra.remove();
+		if (button.nextElementSibling !== settings) settings.before(button);
+		button.disabled = rotation.ad;
+		observeControls(settings.closest(".ytp-right-controls") || settings.parentElement);
+	}
+	function observeControls(controls) {
+		if (rotation.controls === controls) return;
+		rotation.controlsObserver?.disconnect();
+		rotation.controls = controls;
+		rotation.controlsObserver = new MutationObserver(() => {
+			const player = findPlayer();
+			if (player && onWatchPage()) ensureButton(player);
+		});
+		rotation.controlsObserver.observe(controls, {
+			childList: true,
+			subtree: true
+		});
+	}
+	function observePlayer(player) {
+		if (rotation.player === player) return;
+		rotation.playerObserver?.disconnect();
+		rotation.player = player;
+		rotation.playerObserver = new MutationObserver(() => {
+			if (isAdShowing(player) !== rotation.ad) syncRotation();
+		});
+		rotation.playerObserver.observe(player, {
+			attributes: true,
+			attributeFilter: ["class"]
+		});
+	}
+	function observeVideo(player) {
+		const video = player.querySelector("video.html5-main-video") || player.querySelector("video");
+		if (video === rotation.video) return;
+		rotation.videoObserver?.disconnect();
+		rotation.video = video;
+		rotation.videoObserver = null;
+		if (!video) return;
+		rotation.videoObserver = new MutationObserver(scheduleBoxUpdate);
+		rotation.videoObserver.observe(video, {
+			attributes: true,
+			attributeFilter: ["style"]
+		});
+	}
+	function updateBox(player) {
+		if (!isQuarterTurn()) return;
+		let rect;
+		try {
+			rect = player.getVideoContentRect();
+		} catch {
+			return;
+		}
+		if (!rect || !(rect.width > 0) || !(rect.height > 0)) return;
+		const box = {
+			left: Math.round(rect.left) + (rect.width - rect.height) / 2,
+			top: Math.round(rect.top) + (rect.height - rect.width) / 2,
+			width: rect.height,
+			height: rect.width
+		};
+		for (const name of BOX_PROPERTIES) {
+			const property = `--${PREFIX}-${name}`;
+			const value = `${box[name]}px`;
+			if (player.style.getPropertyValue(property) !== value) player.style.setProperty(property, value);
+		}
+	}
+	function scheduleBoxUpdate() {
+		if (rotation.boxFrame || !rotation.angle) return;
+		rotation.boxFrame = requestAnimationFrame(() => {
+			rotation.boxFrame = 0;
+			const player = findPlayer();
+			if (player) updateBox(player);
+		});
+	}
+	function findWatch(player) {
+		return player.closest("ytd-watch-flexy") || [...document.querySelectorAll("ytd-watch-flexy")].find((watch) => !watch.hidden) || document.querySelector("ytd-watch-flexy");
+	}
+	function syncWatchRatio(player) {
+		const watch = findWatch(player);
+		const ratio = readAspectRatio(player);
+		if (!watch || !Number.isFinite(ratio) || !("videoHeightToWidthRatio_" in watch)) return;
+		const heightToWidth = 1 / ratio;
+		if (!nearlyEqual(Number(watch.videoHeightToWidthRatio_), heightToWidth)) watch.videoHeightToWidthRatio_ = heightToWidth;
+	}
+	function scheduleRelayout(followPlayer = true) {
+		if (followPlayer) rotation.relayoutPending = true;
+		cancelAnimationFrame(rotation.relayoutFrame);
+		rotation.relayoutFrame = requestAnimationFrame(() => {
+			rotation.relayoutFrame = 0;
+			const player = findPlayer();
+			if (!player) return;
+			if (rotation.relayoutPending && !isAdShowing(player)) {
+				syncWatchRatio(player);
+				rotation.relayoutPending = false;
+			}
+			window.dispatchEvent(new Event("resize"));
+			updateBox(player);
+		});
+	}
+	function reportAspect(player) {
+		if (isQuarterTurn()) {
+			const target = 1 / rotation.originalRatio;
+			if (rotation.stretched && nearlyEqual(readAspectRatio(player), target)) return;
+			player.updateVideoData({ keywords: keywordsWithStretch(`1:${rotation.originalRatio}`) });
+			rotation.stretched = true;
+			scheduleRelayout();
+			return;
+		}
+		if (!rotation.stretched) return;
+		player.updateVideoData({ keywords: keywordsWithStretch(null) });
+		rotation.stretched = false;
+		scheduleRelayout();
+	}
+	function applyRotation(player) {
+		const active = rotation.angle !== 0 && !rotation.ad;
+		if (!rotation.ad && playerShowsCurrentVideo(player)) try {
+			reportAspect(player);
+		} catch {}
+		if (active) updateBox(player);
+		if (active && isQuarterTurn()) player.style.setProperty(`--${PREFIX}-preview-scale`, String(1 / rotation.originalRatio));
+		for (const angle of ANGLES) player.classList.toggle(`${PREFIX}-${angle}`, active && rotation.angle === angle);
+	}
+	function resetForVideo(videoId) {
+		const wasStretched = rotation.stretched;
+		rotation.videoId = videoId;
+		rotation.angle = 0;
+		rotation.originalRatio = NaN;
+		rotation.originalKeywords = [];
+		rotation.stretched = false;
+		if (wasStretched) rotation.cleanupPending = true;
+	}
+	function clearLeftoverStretch(player) {
+		if (!rotation.cleanupPending) return;
+		if (rotation.ad || !playerShowsCurrentVideo(player)) {
+			scheduleRelayout(false);
+			return;
+		}
+		rotation.originalKeywords = readKeywords(player);
+		try {
+			player.updateVideoData({ keywords: keywordsWithStretch(null) });
+			rotation.cleanupPending = false;
+			scheduleRelayout();
+		} catch {}
+		rotation.originalKeywords = [];
+	}
+	function syncRotation() {
+		if (location.hostname !== "www.youtube.com") return;
+		const player = findPlayer();
+		if (!player || !onWatchPage() && rotation.player !== player) return;
+		addRotationStyles();
+		observePlayer(player);
+		observeVideo(player);
+		const ad = isAdShowing(player);
+		const adStarted = ad && !rotation.ad;
+		const adEnded = !ad && rotation.ad;
+		rotation.ad = ad;
+		if (onWatchPage()) ensureButton(player);
+		const button = player.querySelector(`.${BUTTON_CLASS}`);
+		if (button) button.disabled = rotation.ad;
+		if (rotation.ad) hideTooltip();
+		const videoId = currentVideoId(player);
+		if (videoId && videoId !== rotation.videoId) resetForVideo(videoId);
+		if (adStarted && rotation.stretched) scheduleRelayout(false);
+		if (adEnded && (rotation.relayoutPending || rotation.angle !== 0)) scheduleRelayout();
+		clearLeftoverStretch(player);
+		applyRotation(player);
+	}
+	function rotateClockwise() {
+		const player = findPlayer();
+		if (!player) return;
+		syncRotation();
+		if (rotation.ad || !rotation.videoId || rotation.cleanupPending || !playerShowsCurrentVideo(player)) return;
+		if (!rotation.stretched && !Number.isFinite(rotation.originalRatio)) {
+			rotation.originalRatio = readAspectRatio(player);
+			rotation.originalKeywords = readKeywords(player);
+		}
+		if (!Number.isFinite(rotation.originalRatio)) return;
+		rotation.angle = (rotation.angle + 90) % 360;
+		applyRotation(player);
+	}
+	function onMediaEvent(event) {
+		const target = event.target;
+		if (!target || target.tagName !== "VIDEO" || typeof target.closest !== "function") return;
+		if (target.closest("#movie_player")) syncRotation();
+	}
+	function start() {
+		if (location.hostname !== "www.youtube.com" || onExcludedPage()) return;
+		for (const type of [
+			"loadstart",
+			"loadedmetadata",
+			"playing"
+		]) document.addEventListener(type, onMediaEvent, true);
+		document.addEventListener("yt-navigate-finish", syncRotation, true);
+		document.addEventListener("yt-player-updated", syncRotation, true);
+		document.addEventListener("yt-page-data-updated", syncRotation, true);
+		window.addEventListener("resize", scheduleBoxUpdate, { passive: true });
+		document.addEventListener("fullscreenchange", scheduleBoxUpdate, true);
+		syncRotation();
+	}
 	var features_default = [
 		right_rail_comments_default,
+		shorts_to_watch_default,
+		max_quality_default,
 		{
-			id: "shorts-to-watch",
+			id: "video-rotation",
 			start
-		},
-		max_quality_default
+		}
 	];
 	function inFrame() {
 		try {

@@ -1311,3 +1311,433 @@ test('frames: shorts-to-watch does not start inside an iframe but does in the to
   outer.window.eval(instrumented);
   assert.ok(outer.window.shortsChecks > 0);
 });
+
+const ROTATION_CLASSES = ['tubekit-video-rotation-90', 'tubekit-video-rotation-180', 'tubekit-video-rotation-270'];
+const ROTATION_CONTROLS = `<div class="ytp-right-controls"><div class="ytp-right-controls-left">
+  <button class="ytp-subtitles-button ytp-button"></button>
+  <button class="ytp-button ytp-settings-button"></button>
+</div></div>`;
+const STRETCH_PATTERN = /(?:^|,)yt:stretch=([0-9.]*):?([0-9.]*)(?:,|$)/;
+
+function mockRotationPlayer(w, player, watch, aspect = 16 / 9, keywords = ['blender', 'short']) {
+  w.state = { videoId: 'A', responseId: undefined, mediaAspect: aspect, aspect, keywords, updates: [], resizes: 0 };
+  watch.videoHeightToWidthRatio_ = 1 / aspect;
+  player.getVideoData = () => ({ video_id: w.state.videoId });
+  player.getVideoAspectRatio = () => w.state.aspect;
+  player.getPlayerResponse = () => ({ videoDetails: { videoId: w.state.responseId, keywords: w.state.keywords } });
+  player.getVideoContentRect = () => ({ left: 0, top: 0, width: 441, height: 784 });
+  player.updateVideoData = data => {
+    w.state.updates.push(data.keywords);
+    const match = STRETCH_PATTERN.exec(data.keywords || '');
+    const ratio = match && match[1] && match[2] ? Number(match[1]) / Number(match[2]) : NaN;
+    w.state.aspect = Number.isFinite(ratio) ? ratio : w.state.mediaAspect;
+  };
+  w.addEventListener('resize', () => { w.state.resizes += 1; });
+}
+
+function rotationPage(t, {
+  url = 'https://www.youtube.com/watch?v=A',
+  aspect = 16 / 9,
+  keywords = ['blender', 'short'],
+  ad = false,
+  controls = true,
+} = {}) {
+  const dom = new JSDOM(`<html><head></head><body><ytd-app><ytd-watch-flexy video-id="A">
+    <div id="movie_player" class="html5-video-player${ad ? ' ad-showing' : ''}">
+      <div class="html5-video-container"><video class="video-stream html5-main-video"></video></div>
+      <div class="ytp-chrome-bottom">${controls ? ROTATION_CONTROLS : ''}</div>
+    </div></ytd-watch-flexy></ytd-app></body></html>`, {
+    url,
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  const player = w.document.querySelector('#movie_player');
+  const watch = w.document.querySelector('ytd-watch-flexy');
+  mockRotationPlayer(w, player, watch, aspect, keywords);
+  w.eval(script.replace('function redirectTo(url) {', 'function redirectTo(url) { return;'));
+  const document = w.document;
+  const button = () => document.querySelectorAll('.tubekit-video-rotation-button');
+  const classes = () => ROTATION_CLASSES.filter(name => player.classList.contains(name));
+  const fire = type => document.querySelector('video').dispatchEvent(new w.Event(type));
+  const go = (id, playerId = id) => {
+    w.history.pushState({}, '', `/watch?v=${id}`);
+    w.state.videoId = playerId;
+    fire('loadstart');
+  };
+  return { w, document, player, watch, button, classes, fire, go };
+}
+
+test('video-rotation: one button is placed right before the settings button and never duplicated', async t => {
+  const { document, button, fire } = rotationPage(t);
+  assert.equal(button().length, 1);
+  const settings = document.querySelector('.ytp-settings-button');
+  assert.equal(button()[0].nextElementSibling, settings);
+  assert.ok(button()[0].previousElementSibling.classList.contains('ytp-subtitles-button'));
+  assert.ok(button()[0].classList.contains('ytp-button'));
+  assert.equal(button()[0].getAttribute('aria-label'), '영상 회전');
+  assert.equal(button()[0].querySelectorAll('svg > rect, svg > path').length, 3);
+  for (const type of ['loadstart', 'loadedmetadata', 'playing']) fire(type);
+  document.dispatchEvent(new document.defaultView.Event('yt-navigate-finish'));
+  document.querySelector('.ytp-right-controls-left').append(settings);
+  await sleep(20);
+  assert.equal(button().length, 1);
+  assert.equal(button()[0].nextElementSibling, settings);
+});
+
+test('video-rotation: each click turns 90° clockwise, quarter turns report the swapped ratio, and four clicks return to 0°', async t => {
+  const { w, watch, player, button, classes } = rotationPage(t);
+  const click = () => button()[0].click();
+  click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.equal(w.state.updates.length, 1);
+  assert.match(w.state.updates[0], /^blender,short,yt:stretch=1:1\.777/);
+  assert.ok(Math.abs(w.state.aspect - 9 / 16) < 1e-9);
+  assert.equal(player.style.getPropertyValue('--tubekit-video-rotation-width'), '784px');
+  assert.equal(player.style.getPropertyValue('--tubekit-video-rotation-height'), '441px');
+  assert.equal(player.style.getPropertyValue('--tubekit-video-rotation-left'), '-171.5px');
+  assert.equal(player.style.getPropertyValue('--tubekit-video-rotation-top'), '171.5px');
+  await sleep(50);
+  assert.ok(Math.abs(watch.videoHeightToWidthRatio_ - 16 / 9) < 1e-9);
+  assert.ok(w.state.resizes > 0);
+  click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-180']);
+  assert.equal(w.state.updates[1], 'blender,short,yt:stretch=');
+  assert.ok(Math.abs(w.state.aspect - 16 / 9) < 1e-9);
+  click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-270']);
+  assert.match(w.state.updates[2], /yt:stretch=1:1\.777/);
+  click();
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.length, 4);
+  assert.ok(Math.abs(w.state.aspect - 16 / 9) < 1e-9);
+  await sleep(50);
+  assert.ok(Math.abs(watch.videoHeightToWidthRatio_ - 9 / 16) < 1e-9);
+});
+
+test('video-rotation: an uploader yt:stretch keyword is kept when the rotation is undone', t => {
+  const { w, button } = rotationPage(t, { keywords: ['yt:stretch=4:3', 'tag'] });
+  button()[0].click();
+  assert.equal(w.state.updates[0].split(',').filter(k => k.startsWith('yt:stretch=')).length, 1);
+  button()[0].click();
+  assert.equal(w.state.updates[1], 'tag,yt:stretch=4:3');
+});
+
+test('video-rotation: pause, seeking and same-video media reloads keep the rotation', async t => {
+  const { w, button, classes, fire } = rotationPage(t);
+  button()[0].click();
+  for (const type of ['emptied', 'loadstart', 'loadedmetadata', 'playing']) fire(type);
+  await sleep(20);
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.equal(w.state.updates.length, 1);
+});
+
+test('video-rotation: a video whose data lost the reported ratio gets it back on the next media event', t => {
+  const { w, button, classes, fire } = rotationPage(t);
+  button()[0].click();
+  w.state.aspect = w.state.mediaAspect;
+  fire('loadedmetadata');
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.equal(w.state.updates.length, 2);
+  assert.ok(Math.abs(w.state.aspect - 9 / 16) < 1e-9);
+});
+
+test('video-rotation: a new video resets to 0° and clears the rotated ratio YouTube carried over', async t => {
+  const { w, button, classes, fire, go } = rotationPage(t);
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  w.state.keywords = undefined;
+  go('B');
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.at(-1), 'yt:stretch=');
+  assert.ok(Math.abs(w.state.aspect - 16 / 9) < 1e-9);
+  const updates = w.state.updates.length;
+  fire('playing');
+  assert.equal(w.state.updates.length, updates);
+  go('A');
+  assert.deepEqual(classes(), []);
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+});
+
+test('video-rotation: the button is disabled and rotation is not applied during an ad, then comes back after it', async t => {
+  const { w, player, button, classes, fire } = rotationPage(t, { ad: true });
+  assert.equal(button()[0].disabled, true);
+  button()[0].click();
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.length, 0);
+  player.classList.remove('ad-showing');
+  await sleep(20);
+  assert.equal(button()[0].disabled, false);
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  const updates = w.state.updates.length;
+  player.classList.add('ad-showing');
+  w.state.aspect = w.state.mediaAspect;
+  await sleep(20);
+  fire('playing');
+  assert.deepEqual(classes(), []);
+  assert.equal(button()[0].disabled, true);
+  assert.equal(w.state.updates.length, updates);
+  player.classList.remove('ad-showing');
+  await sleep(20);
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.equal(button()[0].disabled, false);
+  assert.ok(Math.abs(w.state.aspect - 9 / 16) < 1e-9);
+});
+
+test('video-rotation: no button on m.youtube.com, embeds, youtube-nocookie or pages other than /watch', async t => {
+  for (const url of [
+    'https://m.youtube.com/watch?v=A',
+    'https://www.youtube.com/embed/abcdefghijk',
+    'https://www.youtube-nocookie.com/embed/abcdefghijk',
+    'https://www.youtube.com/',
+  ]) {
+    const { document, button, fire } = rotationPage(t, { url });
+    fire('loadstart');
+    document.dispatchEvent(new document.defaultView.Event('yt-navigate-finish'));
+    await sleep(20);
+    assert.equal(button().length, 0, url);
+  }
+});
+
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+test('video-rotation: going back to the rotated video during the next video preroll ad shows it at 0°', async t => {
+  const { w, player, button, classes, go } = rotationPage(t);
+  button()[0].click();
+  player.classList.add('ad-showing');
+  go('B', 'AD');
+  await sleep(20);
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.length, 1);
+  player.classList.remove('ad-showing');
+  go('A');
+  await sleep(20);
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.at(-1), 'blender,short,yt:stretch=');
+  assert.ok(near(w.state.aspect, 16 / 9));
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+});
+
+test('video-rotation: passing through a video without a video id still resets the rotated video to 0°', async t => {
+  const { w, button, classes, go } = rotationPage(t);
+  button()[0].click();
+  go('B', '');
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.length, 1);
+  button()[0].click();
+  assert.deepEqual(classes(), []);
+  go('A');
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.at(-1), 'blender,short,yt:stretch=');
+  assert.ok(near(w.state.aspect, 16 / 9));
+});
+
+test('video-rotation: a midroll ad that reports its own video id does not reset the rotation', async t => {
+  const { w, player, button, classes, fire } = rotationPage(t);
+  button()[0].click();
+  const updates = w.state.updates.length;
+  player.classList.add('ad-showing');
+  w.state.videoId = 'AD';
+  w.state.aspect = w.state.mediaAspect;
+  fire('loadstart');
+  await sleep(20);
+  assert.deepEqual(classes(), []);
+  assert.equal(button()[0].disabled, true);
+  assert.equal(w.state.updates.length, updates);
+  player.classList.remove('ad-showing');
+  await sleep(20);
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.equal(w.state.updates.length, updates);
+  w.state.videoId = 'A';
+  fire('playing');
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.ok(near(w.state.aspect, 9 / 16));
+});
+
+test('video-rotation: leftover cleanup waits for the new video response and keeps its own yt:stretch', async t => {
+  const { w, button, go, fire } = rotationPage(t, { keywords: ['tagA'] });
+  w.state.responseId = 'A';
+  button()[0].click();
+  const updates = w.state.updates.length;
+  go('B');
+  fire('playing');
+  assert.equal(w.state.updates.length, updates);
+  button()[0].click();
+  assert.equal(w.state.updates.length, updates);
+  w.state.responseId = 'B';
+  w.state.keywords = ['yt:stretch=4:3', 'tagB'];
+  w.state.mediaAspect = 4 / 3;
+  fire('loadedmetadata');
+  assert.equal(w.state.updates.at(-1), 'tagB,yt:stretch=4:3');
+  assert.ok(near(w.state.aspect, 4 / 3));
+});
+
+test('video-rotation: a failed leftover cleanup is retried on the next event', t => {
+  const { w, player, button, go, fire } = rotationPage(t);
+  button()[0].click();
+  const update = player.updateVideoData;
+  let failures = 1;
+  player.updateVideoData = data => {
+    if (failures-- > 0) throw new Error('not ready');
+    update(data);
+  };
+  go('B');
+  assert.ok(near(w.state.aspect, 9 / 16));
+  fire('playing');
+  assert.equal(w.state.updates.at(-1), 'blender,short,yt:stretch=');
+  assert.ok(near(w.state.aspect, 16 / 9));
+});
+
+test('video-rotation: a relayout skipped by an ad runs once the ad ends', async t => {
+  const { watch, player, button } = rotationPage(t);
+  button()[0].click();
+  await sleep(50);
+  assert.ok(near(watch.videoHeightToWidthRatio_, 16 / 9));
+  button()[0].click();
+  player.classList.add('ad-showing');
+  await sleep(50);
+  assert.ok(near(watch.videoHeightToWidthRatio_, 16 / 9));
+  player.classList.remove('ad-showing');
+  await sleep(50);
+  assert.ok(near(watch.videoHeightToWidthRatio_, 9 / 16));
+});
+
+test('video-rotation: the ratio goes to the ytd-watch-flexy that holds the player, not a hidden one before it', async t => {
+  const dom = new JSDOM(`<html><head></head><body><ytd-app>
+    <ytd-watch-flexy id="stale" hidden></ytd-watch-flexy>
+    <ytd-watch-flexy id="live"><div id="movie_player" class="html5-video-player">
+      <div class="html5-video-container"><video class="video-stream html5-main-video"></video></div>
+      <div class="ytp-chrome-bottom">${ROTATION_CONTROLS}</div>
+    </div></ytd-watch-flexy></ytd-app></body></html>`, {
+    url: 'https://www.youtube.com/watch?v=A',
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  const stale = w.document.querySelector('#stale');
+  const live = w.document.querySelector('#live');
+  mockRotationPlayer(w, w.document.querySelector('#movie_player'), live);
+  stale.videoHeightToWidthRatio_ = 9 / 16;
+  w.eval(script);
+  w.document.querySelector('.tubekit-video-rotation-button').click();
+  await sleep(50);
+  assert.ok(near(live.videoHeightToWidthRatio_, 16 / 9));
+  assert.ok(near(stale.videoHeightToWidthRatio_, 9 / 16));
+});
+
+test('video-rotation: the button comes back after YouTube replaces the controls group or mounts the controls late', async t => {
+  const replaced = rotationPage(t);
+  const fresh = replaced.document.createElement('div');
+  fresh.className = 'ytp-right-controls-left';
+  fresh.innerHTML = '<button class="ytp-subtitles-button ytp-button"></button><button class="ytp-button ytp-settings-button"></button>';
+  replaced.document.querySelector('.ytp-right-controls-left').replaceWith(fresh);
+  await sleep(20);
+  assert.equal(replaced.button().length, 1);
+  assert.equal(replaced.button()[0].nextElementSibling, fresh.querySelector('.ytp-settings-button'));
+
+  const late = rotationPage(t, { controls: false });
+  assert.equal(late.button().length, 0);
+  late.document.querySelector('.ytp-chrome-bottom').innerHTML = ROTATION_CONTROLS;
+  await sleep(20);
+  assert.equal(late.button().length, 1);
+  assert.ok(late.button()[0].nextElementSibling.classList.contains('ytp-settings-button'));
+  late.document.querySelector('.ytp-right-controls-left').append(late.document.createElement('span'));
+  await sleep(20);
+  assert.equal(late.button().length, 1);
+});
+
+test('video-rotation: embeds, shorts and other non-watch pages get no rotation styles', async t => {
+  for (const url of [
+    'https://www.youtube.com/embed/abcdefghijk',
+    'https://www.youtube.com/shorts/abcdefghijk',
+    'https://www.youtube-nocookie.com/embed/abcdefghijk',
+    'https://www.youtube.com/',
+  ]) {
+    const { document, fire } = rotationPage(t, { url });
+    fire('loadstart');
+    document.dispatchEvent(new document.defaultView.Event('yt-player-updated'));
+    await sleep(20);
+    assert.equal(document.querySelector('#tubekit-video-rotation-styles'), null, url);
+    assert.equal(document.querySelector('.tubekit-video-rotation-button'), null, url);
+  }
+});
+
+test('video-rotation: nothing is added inside an iframe', async t => {
+  const outer = new JSDOM('<html><body><iframe id="f"></iframe></body></html>', {
+    url: 'https://www.youtube.com/watch?v=A',
+    runScripts: 'outside-only',
+  });
+  t.after(() => outer.window.close());
+  const fw = outer.window.document.querySelector('#f').contentWindow;
+  fw.document.open();
+  fw.document.write(`<html><head></head><body><ytd-watch-flexy><div id="movie_player"><video class="html5-main-video"></video><div class="ytp-chrome-bottom">${ROTATION_CONTROLS}</div></div></ytd-watch-flexy></body></html>`);
+  fw.document.close();
+  mockRotationPlayer(fw, fw.document.querySelector('#movie_player'), fw.document.querySelector('ytd-watch-flexy'));
+  fw.eval(script.replace('function redirectTo(url) {', 'function redirectTo(url) { return;'));
+  fw.document.querySelector('video').dispatchEvent(new fw.Event('loadstart'));
+  await sleep(20);
+  assert.equal(fw.document.querySelector('#tubekit-video-rotation-styles'), null);
+  assert.equal(fw.document.querySelector('.tubekit-video-rotation-button'), null);
+});
+
+test('video-rotation: moving from the home page to /watch adds the button, and the miniplayer keeps the rotation', async t => {
+  const { w, document, button, classes } = rotationPage(t, { url: 'https://www.youtube.com/' });
+  assert.equal(document.querySelector('#tubekit-video-rotation-styles'), null);
+  w.history.pushState({}, '', '/watch?v=A');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  assert.equal(button().length, 1);
+  assert.ok(document.querySelector('#tubekit-video-rotation-styles'));
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  w.history.pushState({}, '', '/');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  document.querySelector('video').dispatchEvent(new w.Event('playing'));
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  assert.equal(button().length, 1);
+  w.history.pushState({}, '', '/watch?v=A');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+});
+
+test('video-rotation: rotating beside the comments panel neither tears it down nor holds it', async t => {
+  const dom = new JSDOM(`<html lang="en"><head></head><body><ytd-app>
+    <ytd-watch-flexy video-id="A" is-two-columns_><div id="primary"><ytd-player><div id="movie_player" class="html5-video-player">
+      <div class="html5-video-container"><video class="video-stream html5-main-video"></video></div>
+      <div class="ytp-chrome-bottom">${ROTATION_CONTROLS}</div>
+    </div></ytd-player><div id="below">
+      <ytd-comments id="comments"><ytd-comments-header-renderer></ytd-comments-header-renderer></ytd-comments>
+    </div></div><div id="secondary"><div id="secondary-inner">
+      <div id="related">related</div>
+    </div></div></ytd-watch-flexy></ytd-app></body></html>`, {
+    url: 'https://www.youtube.com/watch?v=A',
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  w.innerWidth = 1440;
+  w.HTMLElement.prototype.getClientRects = function () { return [{}]; };
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.id === 'primary'
+      ? { width: 888, left: 0, right: 888, top: 0 }
+      : { width: 520, left: 920, right: 1440, top: 0 };
+  };
+  mockRotationPlayer(w, w.document.querySelector('#movie_player'), w.document.querySelector('ytd-watch-flexy'));
+  w.eval(script);
+  await sleep(200);
+  const root = w.document.querySelector('#tubekit-root');
+  assert.ok(root);
+  w.document.querySelector('.tubekit-video-rotation-button').click();
+  await sleep(400);
+  assert.ok(w.state.resizes > 0);
+  assert.equal(w.document.querySelector('#tubekit-root'), root);
+  assert.ok(root.isConnected);
+  assert.notEqual(root.dataset.suspended, 'true');
+  assert.ok(w.document.documentElement.classList.contains('tubekit-active'));
+  assert.ok(!w.document.documentElement.classList.contains('tubekit-suspended'));
+});
