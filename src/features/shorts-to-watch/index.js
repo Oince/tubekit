@@ -1,15 +1,8 @@
+import { isVideoId, shortsVideoId } from '../../core/youtube.js';
 import { redirectTo } from './redirect.js';
 
-const ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
-const SHORTS_PATH = /^\/shorts\/([^/]+)\/?$/;
-
-function shortsIdFromPath(pathname) {
-  const match = SHORTS_PATH.exec(pathname);
-  return match && ID_PATTERN.test(match[1]) ? match[1] : null;
-}
-
 function redirectIfShorts() {
-  const id = shortsIdFromPath(location.pathname);
+  const id = shortsVideoId();
   if (!id) return;
   const rest = new URLSearchParams(location.search).toString();
   redirectTo(`/watch?v=${id}${rest ? `&${rest}` : ''}${location.hash}`);
@@ -17,7 +10,7 @@ function redirectIfShorts() {
 
 function watchEndpointFor(endpoint) {
   const id = endpoint && endpoint.reelWatchEndpoint && endpoint.reelWatchEndpoint.videoId;
-  if (typeof id !== 'string' || !ID_PATTERN.test(id)) return null;
+  if (!isVideoId(id)) return null;
   return {
     id,
     endpoint: {

@@ -1,4 +1,5 @@
-const PLAYER_SELECTOR = '#movie_player';
+import { availableQualities, currentVideoId, findPlayer, isAdShowing, isPlaying, playerFollowsVideo, playerOfMediaEvent, setPlaybackQuality } from '../../core/youtube.js';
+
 const QUALITY_HEIGHT = {
   highres: 4320,
   hd2160: 2160,
@@ -29,50 +30,29 @@ function pickBest(entries) {
 }
 
 function applyMaxQuality(player) {
-  try {
-    if (typeof player.getAvailableQualityData !== 'function' || typeof player.setPlaybackQualityRange !== 'function') return false;
-    const best = pickBest(player.getAvailableQualityData() || []);
-    if (!best) return false;
-    if (best.paygatedQualityDetails) player.setPlaybackQualityRange(best.quality, best.quality, best.formatId);
-    else player.setPlaybackQualityRange(best.quality, best.quality);
-    return true;
-  } catch {
-    return false;
-  }
+  const best = pickBest(availableQualities(player));
+  if (!best) return false;
+  return setPlaybackQuality(player, best.quality, ...(best.paygatedQualityDetails ? [best.formatId] : []));
 }
 
 function handlePlaying(player) {
-  if (player.classList.contains('ad-showing')) return;
-  let id;
-  try {
-    id = player.getVideoData().video_id;
-  } catch {
-    return;
-  }
-  if (!id || id === applied.get(player)) return;
+  if (isAdShowing(player)) return;
+  const id = currentVideoId(player);
+  if (!id || !playerFollowsVideo(player, id)) return;
+  if (id === applied.get(player)) return;
   if (applyMaxQuality(player)) applied.set(player, id);
-}
-
-function playerOf(event) {
-  const target = event.target;
-  if (!target || target.tagName !== 'VIDEO' || typeof target.closest !== 'function') return null;
-  return target.closest(PLAYER_SELECTOR);
 }
 
 function start() {
   const controller = new AbortController();
   const stop = () => controller.abort();
   document.addEventListener('playing', event => {
-    const player = playerOf(event);
+    const player = playerOfMediaEvent(event);
     if (player) handlePlaying(player);
   }, { capture: true, signal: controller.signal });
 
-  const existing = document.querySelector(PLAYER_SELECTOR);
-  if (!existing) return stop;
-  try {
-    if (existing.getPlayerState() === 1) handlePlaying(existing);
-  } catch {
-  }
+  const existing = findPlayer();
+  if (existing && isPlaying(existing)) handlePlaying(existing);
   return stop;
 }
 

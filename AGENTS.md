@@ -29,11 +29,12 @@
 ## 소스 구조와 기능 추가
 
 - 새 기능은 `src/features/<기능 id>/`에 만들고 `src/features/index.js` 배열에 한 줄 추가한다. 기능 켜기/끄기·설정 기능은 두지 않는다. 필요 없는 기능은 넣지 않거나 등록부에서 뺀다.
-- 기능 모듈은 서로 import하지 않는다. 두 기능 이상에서 실제로 쓰는 코드가 생길 때만 `src/core/`를 만들어 옮긴다.
+- 기능 모듈은 서로 import하지 않는다. 두 기능 이상에서 실제로 쓰는 코드가 생길 때만 `src/core/`를 만들어 옮긴다. 이 규칙은 모듈 단위로 따진다. 두 기능 이상이 쓰는 `src/core/` 모듈 안에는 한 기능만 쓰는 조작이 있어도 된다.
+- YouTube 플레이어 내부(플레이어 요소의 메서드와 광고 상태)는 `src/core/`의 YouTube 어댑터를 통해서만 건드린다. 기능 모듈은 플레이어 메서드를 직접 부르지 않는다.
 - 새 기능이 페이지에 붙이는 id·클래스·CSS 변수는 `tubekit-<기능 id>-` 접두어를 쓴다. 오른쪽 댓글 패널은 예전부터 쓰던 `tubekit-` 접두어(`#tubekit-root`, `#tubekit-styles` 등)를 그대로 쓴다.
 - 기능의 `start()`는 그 기능이 `window`·`document`에 붙인 리스너와 observer를 떼는 정리 함수를 돌려준다. 테스트만 이 함수를 부르고 `src/main.js`는 반환값을 버린다. 사용자가 기능을 켜고 끄는 수단이 아니다. 새 리스너·observer를 붙이면 정리 함수에도 넣는다.
 - jsdom이 가로챌 수 없는 동작(`location.replace` 같은 페이지 이동)은 기능 폴더 안의 별도 파일로 떼어 테스트에서 `vi.mock`으로 바꿔 끼운다.
-- 테스트는 기능마다 `test/<기능 id>.test.js`에 두고, 공용 준비는 `test/helpers.js`를 쓴다. `src/main.js`의 iframe 판정과 기능 여럿이 함께 도는 경우는 `test/main.test.js`에 둔다.
+- 테스트는 기능마다 `test/<기능 id>.test.js`에 두고, 공용 준비는 `test/helpers.js`를 쓴다. `src/main.js`의 iframe 판정과 기능 여럿이 함께 도는 경우는 `test/main.test.js`에 둔다. `src/core/` 모듈은 기능 테스트를 통해 실제 코드 그대로 시험하고, 기능 테스트로 잡기 어려운 경계만 `test/core-<모듈>.test.js`에 둔다. 테스트에서 가짜로 바꾸는 것은 YouTube 플레이어(`test/helpers.js`의 `fakePlayer`)이고, core 모듈은 `vi.mock`으로 바꿔 끼우지 않는다.
 - 헤더(`@match`, `@grant` 등)는 `vite.config.mjs`에서 고치고, `@version`은 `package.json`의 `version`에서 가져온다.
 - 코드(`src/`, `test/`, 설정 파일)에 주석을 쓰지 않는다. 빌드가 만드는 UserScript 헤더는 예외다.
 

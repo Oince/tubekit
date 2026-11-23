@@ -1,8 +1,9 @@
+import { AD_PLAYER_SELECTORS, NOT_AD_SELECTOR, PLAYER_SELECTOR } from '../../core/youtube.js';
+
 export const PREFIX = 'tubekit-video-rotation';
 
 const STYLE_ID = `${PREFIX}-styles`;
-const PLAYING = ':not(.ad-showing):not(.ad-interrupting)';
-const player = angle => `#movie_player.${PREFIX}-${angle}${PLAYING}`;
+const player = angle => `${PLAYER_SELECTOR}.${PREFIX}-${angle}${NOT_AD_SELECTOR}`;
 const video = angle => `${player(angle)}:not(.ended-mode) video.html5-main-video`;
 const storyboard = angle => `${player(angle)} .ytp-tooltip-bg[style*="/sb/"]`;
 
@@ -27,8 +28,7 @@ const css = `
   ${player(270)} .ytp-tooltip:has(> .ytp-tooltip-bg[style*="/sb/"]) {
     background-color: transparent !important;
   }
-  #movie_player.ad-showing .${PREFIX}-button,
-  #movie_player.ad-interrupting .${PREFIX}-button {
+  ${AD_PLAYER_SELECTORS.map(selector => `${selector} .${PREFIX}-button`).join(',\n  ')} {
     display: none !important;
   }
 `;

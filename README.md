@@ -56,7 +56,7 @@ https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
 
 ## 개발
 
-소스는 `src/features/<기능>/`에 기능별로 있고, 빌드하면 `tubekit.user.js` 한 파일로 합쳐집니다.
+소스는 `src/features/<기능>/`에 기능별로 있고, 여러 기능이 함께 쓰는 YouTube 페이지·플레이어 어댑터는 `src/core/youtube.js`에 있습니다. 빌드하면 `tubekit.user.js` 한 파일로 합쳐집니다.
 
 ```bash
 npm ci

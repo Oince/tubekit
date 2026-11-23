@@ -8,7 +8,6 @@ export const SCROLL_IDLE_MS = 150;
 export const COMMENTS_CHECK_MS = 250;
 
 export const SELECTORS = {
-  watch: 'ytd-watch-flexy',
   primary: '#primary',
   secondary: '#secondary',
   secondaryInner: '#secondary-inner',

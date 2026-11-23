@@ -15,7 +15,7 @@ async function qualityPage({
   state = -1,
   inPlayer = true,
   withPlayer = true,
-  videoId = 'v1',
+  videoId = 'A',
 } = {}) {
   loadPage({ url, body: `<div id="movie_player">${inPlayer ? '<video></video>' : ''}</div>${inPlayer ? '' : '<video id="outside"></video>'}` });
   const player = withPlayer ? fakePlayer(document.querySelector('#movie_player'), { quality: data, playerState: state, videoId }) : null;
@@ -51,6 +51,7 @@ test('pause/resume and same-video media reloads do not re-apply; a new video id 
   fire('loadstart');
   fire('playing');
   expect(player.qualityCalls.length).toBe(1);
+  history.pushState({}, '', '/watch?v=v2');
   player.videoId = 'v2';
   fire('emptied');
   fire('loadstart');
@@ -59,7 +60,7 @@ test('pause/resume and same-video media reloads do not re-apply; a new video id 
 });
 
 test('ad-showing is skipped and the main video applies after the ad', async () => {
-  const player = await qualityPage();
+  const player = await qualityPage({ url: 'https://www.youtube.com/watch?v=main' });
   player.element.classList.add('ad-showing');
   player.videoId = 'ad';
   fire('playing');
@@ -134,4 +135,40 @@ test('a manually chosen 8K is not overridden on the same video', async () => {
   fire('emptied');
   fire('playing');
   expect(player.qualityCalls).toStrictEqual([['hd2160', 'hd2160']]);
+});
+
+test('an ad marked only by ad-interrupting is skipped and the main video applies after it', async () => {
+  const player = await qualityPage();
+  player.element.classList.add('ad-interrupting');
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(0);
+  player.element.classList.remove('ad-interrupting');
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(1);
+});
+
+test('a midroll ad marked by ad-showing is skipped even while the player still reports the main video', async () => {
+  const player = await qualityPage();
+  player.element.classList.add('ad-showing');
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(0);
+  player.element.classList.remove('ad-showing');
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(1);
+});
+
+test('the quality waits until the player has caught up with the video in the address', async () => {
+  const player = await qualityPage();
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(1);
+  history.pushState({}, '', '/watch?v=B');
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(1);
+  player.videoId = 'B';
+  player.responseId = 'A';
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(1);
+  player.responseId = 'B';
+  fire('playing');
+  expect(player.qualityCalls.length).toBe(2);
 });

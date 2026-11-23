@@ -395,3 +395,50 @@ test('closing the miniplayer ends the viewing, so opening the same video again s
   button()[0].click();
   expect(classes()).toStrictEqual(['tubekit-video-rotation-90']);
 });
+
+test('away from the video page the miniplayer gets no new button when YouTube rebuilds its controls', async () => {
+  const { button, classes } = await rotationPage();
+  button()[0].click();
+  history.pushState({}, '', '/');
+  fire('yt-navigate-finish', document);
+  const fresh = document.createElement('div');
+  fresh.className = 'ytp-right-controls-left';
+  fresh.innerHTML = '<button class="ytp-subtitles-button ytp-button"></button><button class="ytp-button ytp-settings-button"></button>';
+  document.querySelector('.ytp-right-controls-left').replaceWith(fresh);
+  await advance(20);
+  fire('playing');
+  fire('yt-player-updated', document);
+  await advance(20);
+  expect(button().length).toBe(0);
+  expect(classes()).toStrictEqual(['tubekit-video-rotation-90']);
+});
+
+test('after the miniplayer closes, a player holding no video is not taken for the ended viewing, so the next video still clears the rotated ratio', async () => {
+  const { state, player, button, classes } = await rotationPage();
+  let size = { width: 888, height: 784 };
+  player.getBoundingClientRect = () => ({ left: 0, top: 0, ...size });
+  state.playerState = 1;
+  button()[0].click();
+  expect(classes()).toStrictEqual(['tubekit-video-rotation-90']);
+  history.pushState({}, '', '/');
+  fire('yt-navigate-finish', document);
+  size = { width: 0, height: 0 };
+  state.playerState = 5;
+  state.aspect = state.mediaAspect;
+  player.classList.add('unstarted-mode');
+  await advance(20);
+  expect(classes()).toStrictEqual([]);
+  const updates = state.updates.length;
+  state.videoId = '';
+  state.keywords = undefined;
+  fire('yt-player-updated', document);
+  await advance(20);
+  expect(state.updates.length).toBe(updates);
+  history.pushState({}, '', '/watch?v=B');
+  state.videoId = 'B';
+  state.keywords = [];
+  fire('yt-navigate-finish', document);
+  fire('loadstart');
+  expect(state.updates.length).toBe(updates + 1);
+  expect(state.updates.at(-1)).toBe('yt:stretch=');
+});

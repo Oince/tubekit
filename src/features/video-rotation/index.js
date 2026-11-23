@@ -1,3 +1,21 @@
+import {
+  currentVideoId,
+  findPlayer,
+  findWatch,
+  isAdShowing,
+  isDesktopSite,
+  isEmbedShortsOrChatPage,
+  isStopped,
+  isVideoPage,
+  playerContaining,
+  playerFollowsVideo,
+  playerOfMediaEvent,
+  requestLayout,
+  setVideoKeywords,
+  videoAspectRatio,
+  videoContentRect,
+  videoKeywords,
+} from '../../core/youtube.js';
 import { PREFIX, addRotationStyles } from './styles.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -28,73 +46,12 @@ const rotation = {
   tooltip: null,
 };
 
-function onWatchPage() {
-  return location.hostname === 'www.youtube.com' && location.pathname === '/watch';
-}
-
-function onExcludedPage() {
-  return /^\/(embed|shorts|live_chat)(\/|$)/.test(location.pathname);
-}
-
-function readUrlVideoId() {
-  try {
-    return new URL(location.href).searchParams.get('v') || null;
-  } catch {
-    return null;
-  }
-}
-
-function findPlayer() {
-  return document.getElementById('movie_player');
-}
-
-function isAdShowing(player) {
-  return player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
-}
-
 function isQuarterTurn() {
   return rotation.angle % 180 === 90;
 }
 
-function readPlayerVideoId(player) {
-  try {
-    return player.getVideoData().video_id || null;
-  } catch {
-    return null;
-  }
-}
-
-function readAspectRatio(player) {
-  try {
-    const ratio = Number(player.getVideoAspectRatio());
-    return Number.isFinite(ratio) && ratio > 0 ? ratio : NaN;
-  } catch {
-    return NaN;
-  }
-}
-
-function currentVideoId(player) {
-  if (onWatchPage()) return readUrlVideoId();
-  return rotation.ad ? null : readPlayerVideoId(player);
-}
-
 function playerShowsCurrentVideo(player) {
-  if (readPlayerVideoId(player) !== rotation.videoId) return false;
-  try {
-    const responseId = player.getPlayerResponse()?.videoDetails?.videoId;
-    return !responseId || responseId === rotation.videoId;
-  } catch {
-    return true;
-  }
-}
-
-function readKeywords(player) {
-  try {
-    const keywords = player.getPlayerResponse().videoDetails.keywords;
-    return Array.isArray(keywords) ? keywords.filter(keyword => typeof keyword === 'string') : [];
-  } catch {
-    return [];
-  }
+  return playerFollowsVideo(player, rotation.videoId);
 }
 
 function keywordsWithStretch(value) {
@@ -169,7 +126,7 @@ function createTooltip() {
 
 function showTooltip(event) {
   const button = event.currentTarget;
-  const player = button.closest('#movie_player');
+  const player = playerContaining(button);
   if (!player || button.disabled) return;
   if (!rotation.tooltip) rotation.tooltip = createTooltip();
   const tooltip = rotation.tooltip;
@@ -210,7 +167,7 @@ function observeControls(controls) {
   rotation.controls = controls;
   rotation.controlsObserver = new MutationObserver(() => {
     const player = findPlayer();
-    if (player && onWatchPage()) ensureButton(player);
+    if (player && isVideoPage()) ensureButton(player);
   });
   rotation.controlsObserver.observe(controls, { childList: true, subtree: true });
 }
@@ -239,13 +196,8 @@ function observeVideo(player) {
 
 function updateBox(player) {
   if (!isQuarterTurn()) return;
-  let rect;
-  try {
-    rect = player.getVideoContentRect();
-  } catch {
-    return;
-  }
-  if (!rect || !(rect.width > 0) || !(rect.height > 0)) return;
+  const rect = videoContentRect(player);
+  if (!rect) return;
   const box = {
     left: Math.round(rect.left) + (rect.width - rect.height) / 2,
     top: Math.round(rect.top) + (rect.height - rect.width) / 2,
@@ -268,15 +220,9 @@ function scheduleBoxUpdate() {
   });
 }
 
-function findWatch(player) {
-  return player.closest('ytd-watch-flexy') ||
-    [...document.querySelectorAll('ytd-watch-flexy')].find(watch => !watch.hidden) ||
-    document.querySelector('ytd-watch-flexy');
-}
-
 function syncWatchRatio(player) {
   const watch = findWatch(player);
-  const ratio = readAspectRatio(player);
+  const ratio = videoAspectRatio(player);
   if (!watch || !Number.isFinite(ratio) || !('videoHeightToWidthRatio_' in watch)) return;
   const heightToWidth = 1 / ratio;
   if (!nearlyEqual(Number(watch.videoHeightToWidthRatio_), heightToWidth)) watch.videoHeightToWidthRatio_ = heightToWidth;
@@ -293,7 +239,7 @@ function scheduleRelayout(followPlayer = true) {
       syncWatchRatio(player);
       rotation.relayoutPending = false;
     }
-    window.dispatchEvent(new Event('resize'));
+    requestLayout();
     updateBox(player);
   });
 }
@@ -301,26 +247,21 @@ function scheduleRelayout(followPlayer = true) {
 function reportAspect(player) {
   if (isQuarterTurn()) {
     const target = 1 / rotation.originalRatio;
-    if (rotation.stretched && nearlyEqual(readAspectRatio(player), target)) return;
-    player.updateVideoData({ keywords: keywordsWithStretch(`1:${rotation.originalRatio}`) });
+    if (rotation.stretched && nearlyEqual(videoAspectRatio(player), target)) return;
+    if (!setVideoKeywords(player, keywordsWithStretch(`1:${rotation.originalRatio}`))) return;
     rotation.stretched = true;
     scheduleRelayout();
     return;
   }
   if (!rotation.stretched) return;
-  player.updateVideoData({ keywords: keywordsWithStretch(null) });
+  if (!setVideoKeywords(player, keywordsWithStretch(null))) return;
   rotation.stretched = false;
   scheduleRelayout();
 }
 
 function applyRotation(player) {
   const active = rotation.angle !== 0 && !rotation.ad;
-  if (!rotation.ad && playerShowsCurrentVideo(player)) {
-    try {
-      reportAspect(player);
-    } catch {
-    }
-  }
+  if (!rotation.ad && playerShowsCurrentVideo(player)) reportAspect(player);
   if (active) updateBox(player);
   if (active && isQuarterTurn()) player.style.setProperty(`--${PREFIX}-preview-scale`, String(1 / rotation.originalRatio));
   for (const angle of ANGLES) player.classList.toggle(`${PREFIX}-${angle}`, active && rotation.angle === angle);
@@ -342,20 +283,18 @@ function clearLeftoverStretch(player) {
     scheduleRelayout(false);
     return;
   }
-  rotation.originalKeywords = readKeywords(player);
-  try {
-    player.updateVideoData({ keywords: keywordsWithStretch(null) });
+  rotation.originalKeywords = videoKeywords(player);
+  if (setVideoKeywords(player, keywordsWithStretch(null))) {
     rotation.cleanupPending = false;
     scheduleRelayout();
-  } catch {
   }
   rotation.originalKeywords = [];
 }
 
 function syncRotation() {
-  if (location.hostname !== 'www.youtube.com') return;
+  if (!isDesktopSite()) return;
   const player = findPlayer();
-  if (!player || (!onWatchPage() && rotation.player !== player)) return;
+  if (!player || (!isVideoPage() && rotation.player !== player)) return;
   addRotationStyles();
   observePlayer(player);
   observeVideo(player);
@@ -363,7 +302,7 @@ function syncRotation() {
   const adStarted = ad && !rotation.ad;
   const adEnded = !ad && rotation.ad;
   rotation.ad = ad;
-  if (onWatchPage()) ensureButton(player);
+  if (isVideoPage()) ensureButton(player);
   const button = player.querySelector(`.${BUTTON_CLASS}`);
   if (button) button.disabled = rotation.ad;
   if (rotation.ad) hideTooltip();
@@ -380,17 +319,9 @@ function isPlayerShown(player) {
   return rect.width > 0 && rect.height > 0;
 }
 
-function isPlayerStopped(player) {
-  try {
-    return [-1, 0, 5].includes(player.getPlayerState());
-  } catch {
-    return false;
-  }
-}
-
 function endViewingWhenPlayerClosed() {
   const player = rotation.player;
-  if (onWatchPage() || !player || isPlayerShown(player) || !isPlayerStopped(player)) return;
+  if (isVideoPage() || !player || isPlayerShown(player) || !isStopped(player)) return;
   if (rotation.angle === 0 && !rotation.stretched) return;
   resetForVideo(null);
   applyRotation(player);
@@ -402,8 +333,8 @@ function rotateClockwise() {
   syncRotation();
   if (rotation.ad || !rotation.videoId || rotation.cleanupPending || !playerShowsCurrentVideo(player)) return;
   if (!rotation.stretched && !Number.isFinite(rotation.originalRatio)) {
-    rotation.originalRatio = readAspectRatio(player);
-    rotation.originalKeywords = readKeywords(player);
+    rotation.originalRatio = videoAspectRatio(player);
+    rotation.originalKeywords = videoKeywords(player);
   }
   if (!Number.isFinite(rotation.originalRatio)) return;
   rotation.angle = (rotation.angle + 90) % 360;
@@ -411,13 +342,11 @@ function rotateClockwise() {
 }
 
 function onMediaEvent(event) {
-  const target = event.target;
-  if (!target || target.tagName !== 'VIDEO' || typeof target.closest !== 'function') return;
-  if (target.closest('#movie_player')) syncRotation();
+  if (playerOfMediaEvent(event)) syncRotation();
 }
 
 function start() {
-  if (location.hostname !== 'www.youtube.com' || onExcludedPage()) return () => {};
+  if (!isDesktopSite() || isEmbedShortsOrChatPage()) return () => {};
   const controller = new AbortController();
   const capture = { capture: true, signal: controller.signal };
   for (const type of ['loadstart', 'loadedmetadata', 'playing']) document.addEventListener(type, onMediaEvent, capture);

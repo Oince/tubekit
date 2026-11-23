@@ -1,6 +1,7 @@
 import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, LIVE_COMMENTS_GRACE_MS, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
 import { ACTIVE_CLASS, HELD, HELD_CLASS, initialLifecycle, mountFailed, step } from './lifecycle.js';
 import { addStyles } from './styles.js';
+import { findWatch, isDesktopSite, isPlayerArea, isVideoPage, pageFollowsUrl, urlVideoId } from '../../core/youtube.js';
 
 const state = {
   generation: 0,
@@ -53,29 +54,6 @@ const labels = () => {
       };
 };
 
-function readVideoId() {
-  try {
-    return new URL(location.href).searchParams.get('v');
-  } catch {
-    return null;
-  }
-}
-
-function currentWatch() {
-  const watches = [...document.querySelectorAll(SELECTORS.watch)];
-  return watches.find((watch) => !watch.hidden && watch.getClientRects().length > 0) || watches.at(-1) || null;
-}
-
-function isWatchPage() {
-  return location.pathname === '/watch' && Boolean(readVideoId());
-}
-
-function watchMatchesUrl(watch) {
-  const urlVideoId = readVideoId();
-  const domVideoId = watch?.getAttribute('video-id');
-  return Boolean(urlVideoId && domVideoId && urlVideoId === domVideoId);
-}
-
 function isTheaterOrFullscreen(watch) {
   return Boolean(
     document.fullscreenElement ||
@@ -106,7 +84,7 @@ function isTwoColumnLayout(watch) {
 }
 
 function isEligible(watch) {
-  return isWatchPage() && watchMatchesUrl(watch) && isTwoColumnLayout(watch) && !isTheaterOrFullscreen(watch);
+  return isVideoPage() && pageFollowsUrl(watch) && isTwoColumnLayout(watch) && !isTheaterOrFullscreen(watch);
 }
 
 function isYoutubePanelOpen(watch) {
@@ -132,17 +110,17 @@ function isRootBroken(watch) {
 }
 
 function isWrongGeneration(watch) {
-  return state.watch !== watch || state.videoId !== readVideoId() || !watchMatchesUrl(watch);
+  return state.watch !== watch || state.videoId !== urlVideoId() || !pageFollowsUrl(watch);
 }
 
 function observe() {
-  const watch = currentWatch();
+  const watch = findWatch();
   const mounted = Boolean(state.root);
   return {
     watch,
     observation: {
       navigating: false,
-      videoId: readVideoId(),
+      videoId: urlVideoId(),
       twoColumn: isEligible(watch),
       fullscreen: isFullscreen(watch),
       youtubePanel: isYoutubePanelOpen(watch),
@@ -351,7 +329,7 @@ function showCommentsUnavailable(generation, node) {
   showToast(labels().unavailable);
   clearTimeout(state.unavailableTimer);
   state.unavailableTimer = window.setTimeout(() => {
-    if (generation === state.generation && node === state.commentsNode && state.videoId === readVideoId()) {
+    if (generation === state.generation && node === state.commentsNode && state.videoId === urlVideoId()) {
       switchTab('related');
     }
   }, 900);
@@ -371,7 +349,7 @@ function observeComments() {
   const node = state.commentsNode;
   let unavailable = false;
   const check = () => {
-    if (generation !== state.generation || node !== state.commentsNode || state.videoId !== readVideoId()) return;
+    if (generation !== state.generation || node !== state.commentsNode || state.videoId !== urlVideoId()) return;
     if (commentsUnavailable(state.commentsNode)) {
       if (!unavailable) {
         unavailable = true;
@@ -563,7 +541,7 @@ function mount(watch, initialTab) {
   state.generation += 1;
   const generation = state.generation;
   state.watch = watch;
-  state.videoId = readVideoId();
+  state.videoId = urlVideoId();
   state.activeTab = initialTab;
   state.scrollTop = { comments: 0, related: 0 };
   state.commentsReady = false;
@@ -686,9 +664,9 @@ function isInsideAdoptedContent(node) {
   return Boolean(state.commentsNode?.contains(node) || state.relatedNode?.contains(node));
 }
 
-const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || Boolean(node.closest?.('#movie_player, ytd-player'));
+const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
 
-const isIdleOffWatch = () => !state.root && location.pathname !== '/watch';
+const isIdleOffWatch = () => !state.root && !isVideoPage();
 
 const onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
 
@@ -745,7 +723,7 @@ function onUrlChanged() {
 }
 
 function boot() {
-  if (location.hostname !== 'www.youtube.com') return () => {};
+  if (!isDesktopSite()) return () => {};
   addStyles();
   state.appObserver = new MutationObserver((records) => {
     retargetObserver();
