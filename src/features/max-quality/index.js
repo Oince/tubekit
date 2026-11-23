@@ -60,17 +60,20 @@ function playerOf(event) {
 }
 
 function start() {
+  const controller = new AbortController();
+  const stop = () => controller.abort();
   document.addEventListener('playing', event => {
     const player = playerOf(event);
     if (player) handlePlaying(player);
-  }, true);
+  }, { capture: true, signal: controller.signal });
 
   const existing = document.querySelector(PLAYER_SELECTOR);
-  if (!existing) return;
+  if (!existing) return stop;
   try {
     if (existing.getPlayerState() === 1) handlePlaying(existing);
   } catch {
   }
+  return stop;
 }
 
 export default { id: 'max-quality', frames: true, start };

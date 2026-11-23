@@ -771,7 +771,7 @@ function onUrlChanged() {
 }
 
 function boot() {
-  if (location.hostname !== 'www.youtube.com') return;
+  if (location.hostname !== 'www.youtube.com') return () => {};
   addStyles();
   state.appObserver = new MutationObserver((records) => {
     retargetObserver();
@@ -781,21 +781,29 @@ function boot() {
   state.observerTarget = document.documentElement;
   state.appObserver.observe(document.documentElement, { childList: true, subtree: true });
 
-  document.addEventListener('yt-navigate-start', onNavigateStart, true);
-  document.addEventListener('yt-navigate-finish', () => scheduleEvaluation(0), true);
-  document.addEventListener('yt-page-data-updated', () => scheduleEvaluation(0), true);
-  window.addEventListener('fullscreenchange', onFullscreenChange, true);
-  window.addEventListener('popstate', onUrlChanged, true);
-  window.addEventListener('urlchange', onUrlChanged, true);
-  window.addEventListener('resize', () => scheduleEvaluation(180), { passive: true });
+  const controller = new AbortController();
+  const { signal } = controller;
+  const capture = { capture: true, signal };
+  document.addEventListener('yt-navigate-start', onNavigateStart, capture);
+  document.addEventListener('yt-navigate-finish', () => scheduleEvaluation(0), capture);
+  document.addEventListener('yt-page-data-updated', () => scheduleEvaluation(0), capture);
+  window.addEventListener('fullscreenchange', onFullscreenChange, capture);
+  window.addEventListener('popstate', onUrlChanged, capture);
+  window.addEventListener('urlchange', onUrlChanged, capture);
+  window.addEventListener('resize', () => scheduleEvaluation(180), { passive: true, signal });
   document.addEventListener('DOMContentLoaded', () => {
     retargetObserver();
     scheduleEvaluation(0);
-  }, { once: true });
+  }, { once: true, signal });
 
   scheduleEvaluation(0);
+  return () => {
+    controller.abort();
+    state.appObserver?.disconnect();
+    state.commentsObserver?.disconnect();
+    state.specialObserver?.disconnect();
+  };
 }
-
 
 export default {
   id: 'right-rail-comments',

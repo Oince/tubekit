@@ -6,7 +6,8 @@
 
 - Tubekit은 사용자 혼자 쓰는 개인용 YouTube 편의 기능 모음이다. 첫 기능은 오른쪽 댓글 패널이고, 앞으로 기능을 계속 추가한다.
 - 소스는 `src/`에 기능별 모듈로 두고, Vite + `vite-plugin-monkey`로 저장소 루트의 `tubekit.user.js` 한 파일로 빌드한다. 이 빌드 결과가 배포물이며 git에 함께 커밋한다. `tubekit.user.js`는 직접 고치지 않는다.
-- `test/build.test.cjs`는 커밋된 `tubekit.user.js`가 `src/`의 현재 빌드 결과와 같은지 확인한다. 빌드를 잊으면 `npm test`가 실패한다.
+- 테스트는 Vitest(jsdom 환경)에서 `src/`의 기능 모듈을 직접 불러와 하나씩 시작해 시험한다(`docs/adr/0002-tests-run-src-in-vitest.md`). 빌드된 `tubekit.user.js`를 `eval`하거나 소스 문자열을 바꿔 끼워 계측하지 않고, 시간은 `sleep` 대신 가짜 시계로 진행한다.
+- `test/build.test.js`는 커밋된 `tubekit.user.js`가 `src/`의 현재 빌드 결과와 같은지 확인한다. 빌드를 잊으면 `npm test`가 실패한다. 배포물을 실행해 보는 자동 테스트는 없으므로 배포물 자체는 아래 브라우저 검증으로 확인한다.
 - jsdom에는 레이아웃 엔진이 없어 화면 배치를 가정하므로 실제 화면 배치·무한 스크롤·댓글 작성·브라우저별 레이아웃 동작은 테스트로 확인할 수 없다. 그래서 아래의 브라우저 검증이 필수다.
 - 브라우저 재현과 검증은 `chrome-devtools` MCP(Chrome)로 한다. 기기별 환경은 아래 "사용 환경"을 본다.
 - Safari에 접근해야 할 때는 `safari-mcp` MCP(`/usr/bin/safaridriver --mcp`)를 쓴다.
@@ -30,7 +31,9 @@
 - 새 기능은 `src/features/<기능 id>/`에 만들고 `src/features/index.js` 배열에 한 줄 추가한다. 기능 켜기/끄기·설정 기능은 두지 않는다. 필요 없는 기능은 넣지 않거나 등록부에서 뺀다.
 - 기능 모듈은 서로 import하지 않는다. 두 기능 이상에서 실제로 쓰는 코드가 생길 때만 `src/core/`를 만들어 옮긴다.
 - 새 기능이 페이지에 붙이는 id·클래스·CSS 변수는 `tubekit-<기능 id>-` 접두어를 쓴다. 오른쪽 댓글 패널은 예전부터 쓰던 `tubekit-` 접두어(`#tubekit-root`, `#tubekit-styles` 등)를 그대로 쓴다.
-- 번들러는 모듈의 최상위 이름을 한 범위로 합치므로, 다른 기능과 이름이 겹치면 `evaluate$1`처럼 바뀐다. 회귀 테스트가 `function evaluate() {`를 찾아 계측하므로 다른 기능에서 최상위 함수 이름 `evaluate`를 쓰지 않는다.
+- 기능의 `start()`는 그 기능이 `window`·`document`에 붙인 리스너와 observer를 떼는 정리 함수를 돌려준다. 테스트만 이 함수를 부르고 `src/main.js`는 반환값을 버린다. 사용자가 기능을 켜고 끄는 수단이 아니다. 새 리스너·observer를 붙이면 정리 함수에도 넣는다.
+- jsdom이 가로챌 수 없는 동작(`location.replace` 같은 페이지 이동)은 기능 폴더 안의 별도 파일로 떼어 테스트에서 `vi.mock`으로 바꿔 끼운다.
+- 테스트는 기능마다 `test/<기능 id>.test.js`에 두고, 공용 준비는 `test/helpers.js`를 쓴다. `src/main.js`의 iframe 판정과 기능 여럿이 함께 도는 경우는 `test/main.test.js`에 둔다.
 - 헤더(`@match`, `@grant` 등)는 `vite.config.mjs`에서 고치고, `@version`은 `package.json`의 `version`에서 가져온다.
 - 코드(`src/`, `test/`, 설정 파일)에 주석을 쓰지 않는다. 빌드가 만드는 UserScript 헤더는 예외다.
 
@@ -53,7 +56,7 @@
 ### 2. 수정
 
 - 재현으로 확인한 원인에 맞춰 수정한다.
-- 가능하면 재현된 문제를 `test/regression.test.cjs`에 회귀 테스트로 추가한다. jsdom으로 표현할 수 없는 레이아웃 문제는 테스트 대신 3단계 브라우저 검증으로 보장한다.
+- 가능하면 재현된 문제를 해당 기능의 `test/<기능 id>.test.js`에 회귀 테스트로 추가한다. jsdom으로 표현할 수 없는 레이아웃 문제는 테스트 대신 3단계 브라우저 검증으로 보장한다.
 - `src/`를 고친 뒤 `npm run build`로 `tubekit.user.js`를 다시 만들고, `npm test`가 통과해야 다음 단계로 넘어간다.
 
 ### 3. 검증

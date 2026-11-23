@@ -71,15 +71,21 @@
 		return target.closest(PLAYER_SELECTOR);
 	}
 	function start$2() {
+		const controller = new AbortController();
+		const stop = () => controller.abort();
 		document.addEventListener("playing", (event) => {
 			const player = playerOf(event);
 			if (player) handlePlaying(player);
-		}, true);
+		}, {
+			capture: true,
+			signal: controller.signal
+		});
 		const existing = document.querySelector(PLAYER_SELECTOR);
-		if (!existing) return;
+		if (!existing) return stop;
 		try {
 			if (existing.getPlayerState() === 1) handlePlaying(existing);
 		} catch {}
+		return stop;
 	}
 	var max_quality_default = {
 		id: "max-quality",
@@ -970,7 +976,7 @@
 		scheduleEvaluation(0);
 	}
 	function boot() {
-		if (location.hostname !== "www.youtube.com") return;
+		if (location.hostname !== "www.youtube.com") return () => {};
 		addStyles();
 		state.appObserver = new MutationObserver((records) => {
 			retargetObserver();
@@ -982,31 +988,49 @@
 			childList: true,
 			subtree: true
 		});
-		document.addEventListener("yt-navigate-start", onNavigateStart, true);
-		document.addEventListener("yt-navigate-finish", () => scheduleEvaluation(0), true);
-		document.addEventListener("yt-page-data-updated", () => scheduleEvaluation(0), true);
-		window.addEventListener("fullscreenchange", onFullscreenChange, true);
-		window.addEventListener("popstate", onUrlChanged, true);
-		window.addEventListener("urlchange", onUrlChanged, true);
-		window.addEventListener("resize", () => scheduleEvaluation(180), { passive: true });
+		const controller = new AbortController();
+		const { signal } = controller;
+		const capture = {
+			capture: true,
+			signal
+		};
+		document.addEventListener("yt-navigate-start", onNavigateStart, capture);
+		document.addEventListener("yt-navigate-finish", () => scheduleEvaluation(0), capture);
+		document.addEventListener("yt-page-data-updated", () => scheduleEvaluation(0), capture);
+		window.addEventListener("fullscreenchange", onFullscreenChange, capture);
+		window.addEventListener("popstate", onUrlChanged, capture);
+		window.addEventListener("urlchange", onUrlChanged, capture);
+		window.addEventListener("resize", () => scheduleEvaluation(180), {
+			passive: true,
+			signal
+		});
 		document.addEventListener("DOMContentLoaded", () => {
 			retargetObserver();
 			scheduleEvaluation(0);
-		}, { once: true });
+		}, {
+			once: true,
+			signal
+		});
 		scheduleEvaluation(0);
+		return () => {
+			controller.abort();
+			state.appObserver?.disconnect();
+			state.commentsObserver?.disconnect();
+			state.specialObserver?.disconnect();
+		};
 	}
 	var right_rail_comments_default = {
 		id: "right-rail-comments",
 		start: boot
 	};
+	function redirectTo(url) {
+		location.replace(url);
+	}
 	var ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 	var SHORTS_PATH = /^\/shorts\/([^/]+)\/?$/;
 	function shortsIdFromPath(pathname) {
 		const match = SHORTS_PATH.exec(pathname);
 		return match && ID_PATTERN.test(match[1]) ? match[1] : null;
-	}
-	function redirectTo(url) {
-		location.replace(url);
 	}
 	function redirectIfShorts() {
 		const id = shortsIdFromPath(location.pathname);
@@ -1038,12 +1062,21 @@
 		if ("href" in detail) detail.href = `/watch?v=${watch.id}`;
 	}
 	function start$1() {
+		const controller = new AbortController();
+		const { signal } = controller;
 		redirectIfShorts();
-		document.addEventListener("yt-navigate", rewriteEndpoint, true);
-		document.addEventListener("yt-navigate-finish", redirectIfShorts);
-		window.addEventListener("popstate", redirectIfShorts);
-		window.addEventListener("navigate", rewriteEndpoint, true);
-		window.addEventListener("state-navigateend", redirectIfShorts);
+		document.addEventListener("yt-navigate", rewriteEndpoint, {
+			capture: true,
+			signal
+		});
+		document.addEventListener("yt-navigate-finish", redirectIfShorts, { signal });
+		window.addEventListener("popstate", redirectIfShorts, { signal });
+		window.addEventListener("navigate", rewriteEndpoint, {
+			capture: true,
+			signal
+		});
+		window.addEventListener("state-navigateend", redirectIfShorts, { signal });
+		return () => controller.abort();
 	}
 	var shorts_to_watch_default = {
 		id: "shorts-to-watch",
@@ -1491,19 +1524,33 @@
 		if (target.closest("#movie_player")) syncRotation();
 	}
 	function start() {
-		if (location.hostname !== "www.youtube.com" || onExcludedPage()) return;
+		if (location.hostname !== "www.youtube.com" || onExcludedPage()) return () => {};
+		const controller = new AbortController();
+		const capture = {
+			capture: true,
+			signal: controller.signal
+		};
 		for (const type of [
 			"loadstart",
 			"loadedmetadata",
 			"playing"
-		]) document.addEventListener(type, onMediaEvent, true);
-		document.addEventListener("yt-navigate-start", endViewingWhenPlayerClosed, true);
-		document.addEventListener("yt-navigate-finish", syncRotation, true);
-		document.addEventListener("yt-player-updated", syncRotation, true);
-		document.addEventListener("yt-page-data-updated", syncRotation, true);
-		window.addEventListener("resize", scheduleBoxUpdate, { passive: true });
-		document.addEventListener("fullscreenchange", scheduleBoxUpdate, true);
+		]) document.addEventListener(type, onMediaEvent, capture);
+		document.addEventListener("yt-navigate-start", endViewingWhenPlayerClosed, capture);
+		document.addEventListener("yt-navigate-finish", syncRotation, capture);
+		document.addEventListener("yt-player-updated", syncRotation, capture);
+		document.addEventListener("yt-page-data-updated", syncRotation, capture);
+		window.addEventListener("resize", scheduleBoxUpdate, {
+			passive: true,
+			signal: controller.signal
+		});
+		document.addEventListener("fullscreenchange", scheduleBoxUpdate, capture);
 		syncRotation();
+		return () => {
+			controller.abort();
+			rotation.controlsObserver?.disconnect();
+			rotation.playerObserver?.disconnect();
+			rotation.videoObserver?.disconnect();
+		};
 	}
 	var features_default = [
 		right_rail_comments_default,

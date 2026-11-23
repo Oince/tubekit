@@ -417,15 +417,23 @@ function onMediaEvent(event) {
 }
 
 function start() {
-  if (location.hostname !== 'www.youtube.com' || onExcludedPage()) return;
-  for (const type of ['loadstart', 'loadedmetadata', 'playing']) document.addEventListener(type, onMediaEvent, true);
-  document.addEventListener('yt-navigate-start', endViewingWhenPlayerClosed, true);
-  document.addEventListener('yt-navigate-finish', syncRotation, true);
-  document.addEventListener('yt-player-updated', syncRotation, true);
-  document.addEventListener('yt-page-data-updated', syncRotation, true);
-  window.addEventListener('resize', scheduleBoxUpdate, { passive: true });
-  document.addEventListener('fullscreenchange', scheduleBoxUpdate, true);
+  if (location.hostname !== 'www.youtube.com' || onExcludedPage()) return () => {};
+  const controller = new AbortController();
+  const capture = { capture: true, signal: controller.signal };
+  for (const type of ['loadstart', 'loadedmetadata', 'playing']) document.addEventListener(type, onMediaEvent, capture);
+  document.addEventListener('yt-navigate-start', endViewingWhenPlayerClosed, capture);
+  document.addEventListener('yt-navigate-finish', syncRotation, capture);
+  document.addEventListener('yt-player-updated', syncRotation, capture);
+  document.addEventListener('yt-page-data-updated', syncRotation, capture);
+  window.addEventListener('resize', scheduleBoxUpdate, { passive: true, signal: controller.signal });
+  document.addEventListener('fullscreenchange', scheduleBoxUpdate, capture);
   syncRotation();
+  return () => {
+    controller.abort();
+    rotation.controlsObserver?.disconnect();
+    rotation.playerObserver?.disconnect();
+    rotation.videoObserver?.disconnect();
+  };
 }
 
 export default { id: 'video-rotation', start };
