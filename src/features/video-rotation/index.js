@@ -221,6 +221,7 @@ function observePlayer(player) {
   rotation.player = player;
   rotation.playerObserver = new MutationObserver(() => {
     if (isAdShowing(player) !== rotation.ad) syncRotation();
+    else endViewingWhenPlayerClosed();
   });
   rotation.playerObserver.observe(player, { attributes: true, attributeFilter: ['class'] });
 }
@@ -374,6 +375,27 @@ function syncRotation() {
   applyRotation(player);
 }
 
+function isPlayerShown(player) {
+  const rect = player.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function isPlayerStopped(player) {
+  try {
+    return [-1, 0, 5].includes(player.getPlayerState());
+  } catch {
+    return false;
+  }
+}
+
+function endViewingWhenPlayerClosed() {
+  const player = rotation.player;
+  if (onWatchPage() || !player || isPlayerShown(player) || !isPlayerStopped(player)) return;
+  if (rotation.angle === 0 && !rotation.stretched) return;
+  resetForVideo(null);
+  applyRotation(player);
+}
+
 function rotateClockwise() {
   const player = findPlayer();
   if (!player) return;
@@ -397,6 +419,7 @@ function onMediaEvent(event) {
 function start() {
   if (location.hostname !== 'www.youtube.com' || onExcludedPage()) return;
   for (const type of ['loadstart', 'loadedmetadata', 'playing']) document.addEventListener(type, onMediaEvent, true);
+  document.addEventListener('yt-navigate-start', endViewingWhenPlayerClosed, true);
   document.addEventListener('yt-navigate-finish', syncRotation, true);
   document.addEventListener('yt-player-updated', syncRotation, true);
   document.addEventListener('yt-page-data-updated', syncRotation, true);

@@ -1704,6 +1704,42 @@ test('video-rotation: moving from the home page to /watch adds the button, and t
   assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
 });
 
+test('video-rotation: closing the miniplayer ends the viewing, so opening the same video again starts at 0°', async t => {
+  const { w, document, player, button, classes } = rotationPage(t);
+  let size = { width: 888, height: 784 };
+  let state = 1;
+  player.getBoundingClientRect = () => ({ left: 0, top: 0, ...size });
+  player.getPlayerState = () => state;
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  w.history.pushState({}, '', '/');
+  size = { width: 0, height: 0 };
+  player.classList.add('ytp-player-minimized');
+  await sleep(20);
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  size = { width: 192, height: 341 };
+  document.dispatchEvent(new w.Event('yt-navigate-start'));
+  w.history.pushState({}, '', '/watch?v=A');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+  w.history.pushState({}, '', '/');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  size = { width: 0, height: 0 };
+  state = 5;
+  w.state.aspect = w.state.mediaAspect;
+  player.classList.add('unstarted-mode');
+  await sleep(20);
+  assert.deepEqual(classes(), []);
+  w.history.pushState({}, '', '/watch?v=A');
+  document.dispatchEvent(new w.Event('yt-navigate-finish'));
+  document.querySelector('video').dispatchEvent(new w.Event('loadstart'));
+  assert.deepEqual(classes(), []);
+  assert.equal(w.state.updates.at(-1), 'blender,short,yt:stretch=');
+  assert.ok(Math.abs(w.state.aspect - 16 / 9) < 1e-9);
+  button()[0].click();
+  assert.deepEqual(classes(), ['tubekit-video-rotation-90']);
+});
+
 test('video-rotation: rotating beside the comments panel neither tears it down nor holds it', async t => {
   const dom = new JSDOM(`<html lang="en"><head></head><body><ytd-app>
     <ytd-watch-flexy video-id="A" is-two-columns_><div id="primary"><ytd-player><div id="movie_player" class="html5-video-player">
