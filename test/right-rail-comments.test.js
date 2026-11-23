@@ -1,4 +1,5 @@
-import { expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { initialLifecycle, mountFailed, step } from '../src/features/right-rail-comments/lifecycle.js';
 import { advance, loadPage, onCleanup, startFeature, stubProperty } from './helpers.js';
 
 const HIDDEN_RECT = { width: 0, left: 0, right: 0 };
@@ -59,6 +60,12 @@ function newComments(document) {
   node.id = 'comments';
   node.innerHTML = '<ytd-comments-header-renderer></ytd-comments-header-renderer>';
   return node;
+}
+
+function expandedPanel(document) {
+  const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
+  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+  return panel;
 }
 
 function removeMarkers(document) {
@@ -336,8 +343,7 @@ test('special panels release rail clipping and closing them restores the panel',
   const { document } = await setup();
   const secondary = document.querySelector('#secondary');
   expect(getComputedStyle(secondary).overflowY).toBe('clip');
-  const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
-  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+  const panel = expandedPanel(document);
   document.querySelector('#secondary-inner').append(panel);
   await advance(200);
   expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
@@ -644,13 +650,22 @@ test('secondary column offsets its top with margin, not padding, so a short left
 });
 
 function spyScrollTop(pane) {
-  const spyState = { value: 0, hidden: false };
+  let value = 0;
+  let hidden = false;
   Object.defineProperty(pane, 'scrollTop', {
     configurable: true,
-    get() { return spyState.hidden ? 0 : spyState.value; },
-    set(v) { spyState.value = v; },
+    get() { return hidden ? 0 : value; },
+    set(v) { if (!hidden) value = v; },
   });
-  return spyState;
+  return {
+    get value() { return value; },
+    set value(v) { value = v; },
+    get hidden() { return hidden; },
+    set hidden(v) {
+      hidden = v;
+      if (hidden) value = 0;
+    },
+  };
 }
 
 test('re-selecting the same tab keeps the scroll position', async () => {
@@ -694,18 +709,18 @@ test('scroll position survives opening and closing a special panel on both tabs'
     await raf();
     await raf();
     panes[tab].value = 300;
-    const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
-    panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+    const panel = expandedPanel(document);
     document.querySelector('#secondary-inner').append(panel);
-    await advance(200);
+    await raf();
     expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
     panes[tab].hidden = true;
-    panel.remove();
     await advance(200);
+    panel.remove();
+    await raf();
+    expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('false');
     panes[tab].hidden = false;
     await raf();
     await raf();
-    expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('false');
     expect(panes[tab].value, `${tab} scroll restored`).toBe(300);
   }
 });
@@ -729,18 +744,20 @@ test('live streams with hidden comments beside the chat fall back to related', a
   expect(selected(document)).toBe('related');
 });
 
-test('closing a live chat on a video with comments returns to the comments tab', async () => {
-  const { document } = await setup();
-  const chat = document.createElement('div');
-  chat.id = 'chat-container';
-  chat.innerHTML = '<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>';
-  document.querySelector('#secondary-inner').prepend(chat);
-  await advance(200);
-  expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
-  chat.firstElementChild.setAttribute('collapsed', '');
-  await advance(200);
-  expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('false');
+test('comments found off while a YouTube panel holds the panel come back on the related tab when the panel closes', async () => {
+  const { document } = await setup({ disabled: true });
+  const root = document.querySelector('#tubekit-root');
+  const panel = expandedPanel(document);
+  document.querySelector('#secondary-inner').append(panel);
+  await advance(100);
+  expect(root.dataset.suspended).toBe('true');
   expect(selected(document)).toBe('comments');
+  await advance(800);
+  expect(selected(document), 'switched while held').toBe('related');
+  panel.remove();
+  await advance(200);
+  expect(root.dataset.suspended).toBe('false');
+  expect(selected(document)).toBe('related');
 });
 
 function fullscreenStub(panes = {}) {
@@ -795,6 +812,30 @@ const frames = async () => {
   for (let i = 0; i < 2; i++) await advance(16);
 };
 
+test('switching tabs while a YouTube panel holds the panel keeps both saved scroll positions', async () => {
+  const { document } = await setup();
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs();
+  const panel = expandedPanel(document);
+  document.querySelector('#secondary-inner').append(panel);
+  await advance(16);
+  expect(root.dataset.suspended).toBe('true');
+  Object.values(panes).forEach(pane => { pane.hidden = true; });
+  document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
+  await advance(1300);
+  expect(selected(document), 'switched while held').toBe('related');
+  panel.remove();
+  await advance(16);
+  expect(root.dataset.suspended).toBe('false');
+  Object.values(panes).forEach(pane => { pane.hidden = false; });
+  await frames();
+  expect(selected(document)).toBe('related');
+  expect(panes.related.value).toBe(700);
+  document.querySelector('[role="tab"][data-tab="comments"]').click();
+  await frames();
+  expect(panes.comments.value).toBe(300);
+});
+
 test('fullscreen holds the panel and restores the tab and both scroll positions on exit', async () => {
   const { document } = await setup();
   const root = document.querySelector('#tubekit-root');
@@ -815,23 +856,6 @@ test('fullscreen holds the panel and restores the tab and both scroll positions 
   expect(panes.comments.value).toBe(300);
   document.querySelector('[role="tab"][data-tab="related"]').click();
   await frames();
-  expect(panes.related.value).toBe(700);
-});
-
-test('fullscreen keeps the related tab and its scroll position', async () => {
-  const { document } = await setup();
-  const root = document.querySelector('#tubekit-root');
-  const panes = await scrollBothTabs();
-  document.querySelector('[role="tab"][data-tab="related"]').click();
-  await frames();
-  const fullscreen = fullscreenStub(panes);
-  fullscreen.enter();
-  await advance(200);
-  fullscreen.exit();
-  await advance(200);
-  await frames();
-  expect(document.querySelector('#tubekit-root'), 'not torn down').toBe(root);
-  expect(selected(document)).toBe('related');
   expect(panes.related.value).toBe(700);
 });
 
@@ -902,116 +926,119 @@ test('fullscreen ending outside the two-column layout tears the panel down', asy
   expect(document.documentElement.classList.contains('tubekit-suspended')).toBe(false);
 });
 
-test('a YouTube panel open before fullscreen keeps the panel held after exit until it closes', async () => {
-  const { document } = await setup();
-  const root = document.querySelector('#tubekit-root');
-  const panes = await scrollBothTabs();
-  const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
-  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
-  document.querySelector('#secondary-inner').append(panel);
-  await advance(200);
-  expect(root.dataset.suspended).toBe('true');
-  panes.comments.hidden = true;
-  const fullscreen = fullscreenStub(panes);
-  fullscreen.enter();
-  panel.setAttribute('hidden', '');
-  panel.removeAttribute('hidden');
-  await advance(300);
-  expect(document.querySelector('#tubekit-root')).toBe(root);
-  expect(root.dataset.suspended).toBe('true');
-  fullscreen.exit();
-  panes.comments.hidden = true;
-  await advance(300);
-  expect(document.querySelector('#tubekit-root')).toBe(root);
-  expect(root.dataset.suspended, 'still held by the YouTube panel').toBe('true');
-  panel.remove();
-  await advance(200);
-  panes.comments.hidden = false;
-  await frames();
-  expect(root.dataset.suspended).toBe('false');
-  expect(selected(document)).toBe('comments');
-  expect(panes.comments.value).toBe(300);
-});
-
-function expandedPanel(document) {
-  const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
-  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
-  return panel;
-}
-
-test('a YouTube panel closed during fullscreen keeps its hold until exit, then restores the tab before it', async () => {
-  const { document } = await setup();
-  const root = document.querySelector('#tubekit-root');
-  const panes = await scrollBothTabs();
-  document.querySelector('[role="tab"][data-tab="related"]').click();
-  await frames();
-  const panel = expandedPanel(document);
-  document.querySelector('#secondary-inner').append(panel);
-  await advance(200);
-  expect(root.dataset.suspended).toBe('true');
-  document.querySelector('[role="tab"][data-tab="comments"]').click();
-  const fullscreen = fullscreenStub(panes);
-  fullscreen.enter();
-  panel.setAttribute('hidden', '');
-  await advance(300);
-  expect(selected(document), 'the YouTube panel hold is kept during fullscreen').toBe('comments');
-  panel.remove();
-  await advance(300);
-  expect(selected(document), 'closing the YouTube panel is not handled during fullscreen').toBe('comments');
-  expect(root.dataset.suspended).toBe('true');
-  fullscreen.exit();
-  await advance(200);
-  await frames();
-  expect(document.querySelector('#tubekit-root')).toBe(root);
-  expect(root.dataset.suspended).toBe('false');
-  expect(selected(document), 'restored to the tab before the YouTube panel').toBe('related');
-  expect(panes.related.value).toBe(700);
-});
-
-test('a YouTube panel opened during fullscreen holds the panel after exit until it closes', async () => {
-  const { document } = await setup();
-  const root = document.querySelector('#tubekit-root');
-  const panes = await scrollBothTabs();
-  const fullscreen = fullscreenStub(panes);
-  fullscreen.enter();
-  await advance(200);
-  const panel = expandedPanel(document);
-  document.querySelector('#secondary-inner').append(panel);
-  await advance(300);
-  expect(root.dataset.suspended).toBe('true');
-  fullscreen.exit();
-  panes.comments.hidden = true;
-  await advance(300);
-  expect(document.querySelector('#tubekit-root')).toBe(root);
-  expect(root.dataset.suspended, 'held by the YouTube panel after fullscreen').toBe('true');
-  panel.remove();
-  await advance(200);
-  panes.comments.hidden = false;
-  await frames();
-  expect(root.dataset.suspended).toBe('false');
-  expect(selected(document)).toBe('comments');
-  expect(panes.comments.value).toBe(300);
-});
-
-test('comments found off during fullscreen stay on related after exit', async () => {
-  const { document } = await setup();
-  const panes = await scrollBothTabs();
-  const fullscreen = fullscreenStub(panes);
-  fullscreen.enter();
-  await advance(100);
-  document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
-  await advance(1300);
-  expect(selected(document)).toBe('related');
-  fullscreen.exit();
-  await advance(200);
-  await frames();
-  expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('false');
-  expect(selected(document)).toBe('related');
-  expect(panes.related.value).toBe(700);
-});
-
 test('theater mode tears the panel down instead of holding it, although YouTube sets full-bleed-player there as in fullscreen', async () => {
   const { document, watch } = await setup();
   await theater(watch);
   expect(document.querySelector('#tubekit-root')).toBe(null);
+});
+
+describe('lifecycle rules', () => {
+  const onA = { videoId: 'A', tab: 'related' };
+  const released = (rememberedTab = null) => ({ phase: 'released', rememberedTab });
+  const shown = (rememberedTab = null) => ({ phase: 'shown', rememberedTab });
+  const held = (rememberedTab = null) => ({ phase: 'held', rememberedTab });
+  const idle = {
+    navigating: false,
+    videoId: 'A',
+    twoColumn: false,
+    fullscreen: false,
+    youtubePanel: false,
+    wrongGeneration: false,
+    brokenRoot: false,
+    currentTab: null,
+  };
+  const offScreen = facts => ({ ...idle, ...facts });
+  const onScreen = facts => ({ ...idle, twoColumn: true, currentTab: onA, ...facts });
+  const inFullscreen = facts => ({ ...idle, fullscreen: true, currentTab: onA, ...facts });
+  const names = effects => effects.map(effect => (effect.type === 'mount' ? `mount:${effect.tab}` : effect.type));
+
+  test.each([
+    ['the panel starts released', initialLifecycle, offScreen(), released(), []],
+    ['two-column layout shows the panel on the comments tab', released(), onScreen({ currentTab: null }), shown(), ['mount:comments']],
+    ['no panel outside the two-column layout', released(), offScreen(), released(), []],
+    ['fullscreen alone never shows the panel', released(), inFullscreen({ currentTab: null }), released(), []],
+    ['a YouTube panel open when the layout appears shows the panel held', released(), onScreen({ currentTab: null, youtubePanel: true }), held(), ['mount:comments', 'saveScroll', 'hide']],
+    ['shown panel stays put while nothing changes', shown(), onScreen(), shown(), []],
+
+    ['leaving the two-column layout releases and remembers the tab', shown(), offScreen({ currentTab: onA }), released(onA), ['teardown']],
+    ['the same video back in the two-column layout resumes the remembered tab', released(onA), onScreen({ currentTab: null }), shown(onA), ['mount:related']],
+    ['another video does not resume the remembered tab', released(onA), onScreen({ videoId: 'B', currentTab: null }), shown(), ['mount:comments']],
+    ['seeing another video forgets the remembered tab', released(onA), offScreen({ videoId: 'B' }), released(), []],
+    ['leaving the watch page forgets the remembered tab', released(onA), offScreen({ videoId: null }), released(), []],
+    ['navigation start releases and forgets the tab', shown(), onScreen({ navigating: true }), released(), ['teardown']],
+    ['navigation start forgets the tab of an already released panel', released(onA), offScreen({ navigating: true }), released(), []],
+    ['navigation start never shows the panel', released(), onScreen({ navigating: true, currentTab: null }), released(), []],
+    ['fullscreen holds instead of releasing', shown(), inFullscreen(), held(), ['saveScroll', 'hide']],
+
+    ['a YouTube panel holds a shown panel', shown(), onScreen({ youtubePanel: true }), held(), ['saveScroll', 'hide']],
+    ['the hold lasts while the YouTube panel stays open', held(), onScreen({ youtubePanel: true }), held(), []],
+    ['the hold lasts while either cause remains', held(), inFullscreen({ youtubePanel: true }), held(), []],
+    ['the hold lasts through fullscreen even when the YouTube panel is not detected there', held(), inFullscreen(), held(), []],
+    ['fullscreen ending with a YouTube panel still open keeps the hold without restoring a tab', held(), onScreen({ youtubePanel: true }), held(), []],
+    ['all causes gone shows the panel again on the active tab', held(), onScreen(), shown(), ['unhide', 'restoreTab']],
+    ['fullscreen ending outside the two-column layout releases', held(), offScreen({ currentTab: onA }), released(onA), ['teardown']],
+    ['leaving the two-column layout while a YouTube panel holds releases', held(), offScreen({ youtubePanel: true, currentTab: onA }), released(onA), ['teardown']],
+    ['the video changing during fullscreen releases without showing', held(), inFullscreen({ wrongGeneration: true, videoId: 'B' }), released(), ['teardown']],
+    ['the video changing while a YouTube panel holds releases and shows the new video fresh', held(), onScreen({ wrongGeneration: true, videoId: 'B' }), shown(), ['teardown', 'mount:comments']],
+    ['the video changing on a shown panel releases at once', shown(), offScreen({ wrongGeneration: true, videoId: 'B', currentTab: onA }), released(), ['teardown']],
+
+    ['a root YouTube detached is released and shown again on the same tab', shown(), onScreen({ brokenRoot: true }), shown(onA), ['teardown', 'mount:related']],
+    ['a held root YouTube detached is rebuilt still held', held(), onScreen({ brokenRoot: true, youtubePanel: true }), held(onA), ['teardown', 'mount:related', 'saveScroll', 'hide']],
+    ['a root YouTube detached during fullscreen is released', held(), inFullscreen({ brokenRoot: true }), released(onA), ['teardown']],
+  ])('%s', (_name, before, observation, after, effects) => {
+    const result = step(before, observation);
+    expect(result.state).toStrictEqual(after);
+    expect(names(result.effects)).toStrictEqual(effects);
+  });
+
+  test.each([
+    ['shown', onScreen({ currentTab: null }), ['mount:related']],
+    ['held', onScreen({ currentTab: null, youtubePanel: true }), ['mount:related', 'saveScroll', 'hide']],
+  ])('a mount YouTube was not ready for, about to be %s, stays released and keeps the remembered tab for the next try', (phase, observation, effects) => {
+    const { state: next, effects: planned } = step(released(onA), observation);
+    expect(next.phase).toBe(phase);
+    expect(names(planned)).toStrictEqual(effects);
+    expect(mountFailed(next)).toStrictEqual(released(onA));
+  });
+
+  const run = (start, observations) => {
+    let state = start;
+    return observations.map(observation => {
+      const result = step(state, observation);
+      state = result.state;
+      return [state.phase, names(result.effects)];
+    });
+  };
+
+  const hold = ['held', ['saveScroll', 'hide']];
+  const stay = ['held', []];
+  const show = ['shown', ['unhide', 'restoreTab']];
+
+  test.each([
+    ['panel opened before fullscreen, closed after it', [
+      [onScreen({ youtubePanel: true }), hold], [inFullscreen(), stay], [onScreen({ youtubePanel: true }), stay], [onScreen(), show],
+    ]],
+    ['panel opened before fullscreen, closed during it', [
+      [onScreen({ youtubePanel: true }), hold], [inFullscreen(), stay], [onScreen(), show],
+    ]],
+    ['panel opened during fullscreen, closed after it', [
+      [inFullscreen(), hold], [inFullscreen({ youtubePanel: true }), stay], [onScreen({ youtubePanel: true }), stay], [onScreen(), show],
+    ]],
+    ['panel opened and closed during fullscreen', [
+      [inFullscreen(), hold], [inFullscreen({ youtubePanel: true }), stay], [inFullscreen(), stay], [onScreen(), show],
+    ]],
+    ['panel opened after fullscreen', [
+      [inFullscreen(), hold], [onScreen({ youtubePanel: true }), stay], [onScreen(), show],
+    ]],
+  ])('fullscreen and a YouTube panel: %s', (_name, steps) => {
+    expect(run(shown(), steps.map(([observation]) => observation))).toStrictEqual(steps.map(([, expected]) => expected));
+  });
+
+  test('a tab remembered on one video is not resumed after another video was seen in between', () => {
+    expect(run(released(onA), [offScreen({ videoId: 'B' }), onScreen({ currentTab: null })])).toStrictEqual([
+      ['released', []],
+      ['shown', ['mount:comments']],
+    ]);
+  });
+
 });

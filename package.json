@@ -1,7 +1,7 @@
 {
   "name": "tubekit",
   "private": true,
-  "version": "0.7.2",
+  "version": "0.7.3",
   "scripts": {
     "build": "vite build",
     "test": "node --check tubekit.user.js && vitest run"

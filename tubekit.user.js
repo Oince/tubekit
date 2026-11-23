@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.7.2
+// @version      0.7.3
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -101,12 +101,85 @@
 		related: "ytd-watch-next-secondary-results-renderer#related, #related",
 		comments: "ytd-comments#comments"
 	};
+	var ACTIVE_CLASS = `${SCRIPT_ID}-active`;
+	var HELD_CLASS = `${SCRIPT_ID}-suspended`;
+	var SHOWN_SCOPE = `html.${ACTIVE_CLASS}:not(.${HELD_CLASS})`;
+	var HELD_STYLES = `#${SCRIPT_ID}-root[data-suspended='true'] {
+      display: none !important;
+    }`;
+	var RELEASED = "released";
+	var SHOWN = "shown";
+	var HELD = "held";
+	var initialLifecycle = Object.freeze({
+		phase: RELEASED,
+		rememberedTab: null
+	});
+	var effect = (type, fields = {}) => ({
+		type,
+		...fields
+	});
+	function keepsPanel(observation) {
+		if (observation.wrongGeneration || observation.brokenRoot) return false;
+		return observation.fullscreen || observation.twoColumn;
+	}
+	function step(state, observation) {
+		const effects = [];
+		if (observation.navigating) {
+			if (state.phase !== "released") effects.push(effect("teardown"));
+			return {
+				state: {
+					phase: RELEASED,
+					rememberedTab: null
+				},
+				effects
+			};
+		}
+		let { phase, rememberedTab } = state;
+		if (phase !== "released" && !keepsPanel(observation)) {
+			effects.push(effect("teardown"));
+			phase = RELEASED;
+			rememberedTab = observation.currentTab ?? null;
+		}
+		if (rememberedTab && rememberedTab.videoId !== observation.videoId) rememberedTab = null;
+		if (phase === "released") {
+			if (!observation.twoColumn) return {
+				state: {
+					phase,
+					rememberedTab
+				},
+				effects
+			};
+			effects.push(effect("mount", { tab: rememberedTab?.tab ?? "comments" }));
+			phase = SHOWN;
+		}
+		const held = Boolean(observation.fullscreen || observation.youtubePanel);
+		if (phase === "shown" && held) {
+			effects.push(effect("saveScroll"), effect("hide"));
+			phase = HELD;
+		} else if (phase === "held" && !held) {
+			effects.push(effect("unhide"), effect("restoreTab"));
+			phase = SHOWN;
+		}
+		return {
+			state: {
+				phase,
+				rememberedTab
+			},
+			effects
+		};
+	}
+	function mountFailed(state) {
+		return {
+			...state,
+			phase: RELEASED
+		};
+	}
 	function addStyles() {
 		if (document.getElementById(`tubekit-styles`)) return;
 		const style = document.createElement("style");
 		style.id = `${SCRIPT_ID}-styles`;
 		style.textContent = `
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary {
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
@@ -119,7 +192,7 @@
       overflow-y: clip !important;
     }
 
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner {
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -129,8 +202,8 @@
       overflow-y: clip !important;
     }
 
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner > #related,
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner > ytd-watch-next-secondary-results-renderer#related {
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > #related,
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > ytd-watch-next-secondary-results-renderer#related {
       display: none !important;
     }
 
@@ -165,9 +238,7 @@
       --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #0f0f0f));
     }
 
-    #${SCRIPT_ID}-root[data-suspended='true'] {
-      display: none !important;
-    }
+    ${HELD_STYLES}
 
     #${SCRIPT_ID}-tabs {
       position: relative;
@@ -349,10 +420,7 @@
 			comments: 0,
 			related: 0
 		},
-		suspendedBy: null,
-		fullscreenHeld: false,
-		tabBeforeSpecialPanel: "comments",
-		lastTab: null,
+		lifecycle: initialLifecycle,
 		mountTimeout: 0,
 		commentsTimeout: 0,
 		commentsCheckTimer: 0,
@@ -419,6 +487,41 @@
 	}
 	function isEligible(watch) {
 		return isWatchPage() && watchMatchesUrl(watch) && isTwoColumnLayout(watch) && !isTheaterOrFullscreen(watch);
+	}
+	function isYoutubePanelOpen(watch) {
+		const inner = watch?.querySelector(SELECTORS.secondaryInner);
+		if (!inner) return false;
+		const chat = inner.querySelector("#chat-container ytd-live-chat-frame:not([collapsed]), ytd-live-chat-frame:not([collapsed])");
+		if (chat && chat.getClientRects().length > 0) return true;
+		return [...inner.querySelectorAll("ytd-engagement-panel-section-list-renderer[visibility=\"ENGAGEMENT_PANEL_VISIBILITY_EXPANDED\"]")].some((panel) => {
+			return (panel.getAttribute("target-id") || "") !== "engagement-panel-comments-section" && panel.getClientRects().length > 0;
+		});
+	}
+	function isRootBroken(watch) {
+		return !state.root.isConnected || state.root.parentNode !== watch?.querySelector(SELECTORS.secondaryInner) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane);
+	}
+	function isWrongGeneration(watch) {
+		return state.watch !== watch || state.videoId !== readVideoId() || !watchMatchesUrl(watch);
+	}
+	function observe() {
+		const watch = currentWatch();
+		const mounted = Boolean(state.root);
+		return {
+			watch,
+			observation: {
+				navigating: false,
+				videoId: readVideoId(),
+				twoColumn: isEligible(watch),
+				fullscreen: isFullscreen(watch),
+				youtubePanel: isYoutubePanelOpen(watch),
+				wrongGeneration: mounted && isWrongGeneration(watch),
+				brokenRoot: mounted && isRootBroken(watch),
+				currentTab: mounted && state.videoId ? {
+					videoId: state.videoId,
+					tab: state.activeTab
+				} : null
+			}
+		};
 	}
 	function marker(name) {
 		return document.createComment(`${SCRIPT_ID}:${name}`);
@@ -521,7 +624,7 @@
 		if (state.root.getAttribute("aria-label") !== label) state.root.setAttribute("aria-label", label);
 	}
 	function isHidden() {
-		return state.root?.dataset.suspended === "true";
+		return state.lifecycle.phase === HELD;
 	}
 	function isPaneShown(pane) {
 		return Boolean(pane) && !isHidden() && pane.getClientRects().length > 0;
@@ -713,53 +816,6 @@
 		window.dispatchEvent(new Event("scroll"));
 		waitForComments(state.generation);
 	}
-	function detectSpecialPanel() {
-		const inner = state.watch?.querySelector(SELECTORS.secondaryInner);
-		if (!inner) return null;
-		const chat = inner.querySelector("#chat-container ytd-live-chat-frame:not([collapsed]), ytd-live-chat-frame:not([collapsed])");
-		if (chat && chat.getClientRects().length > 0) return "chat";
-		return [...inner.querySelectorAll("ytd-engagement-panel-section-list-renderer[visibility=\"ENGAGEMENT_PANEL_VISIBILITY_EXPANDED\"]")].find((panel) => {
-			return (panel.getAttribute("target-id") || "") !== "engagement-panel-comments-section" && panel.getClientRects().length > 0;
-		}) ? "engagement" : null;
-	}
-	function applySuspended() {
-		const held = Boolean(state.suspendedBy || state.fullscreenHeld);
-		document.documentElement.classList.toggle(`${SCRIPT_ID}-suspended`, held);
-		if (state.root && state.root.dataset.suspended !== String(held)) state.root.dataset.suspended = String(held);
-	}
-	function syncSpecialPanel() {
-		if (!state.root || state.fullscreenHeld) return;
-		const special = detectSpecialPanel();
-		if (special && !state.suspendedBy) {
-			state.tabBeforeSpecialPanel = state.activeTab;
-			saveActiveScrollTop();
-			state.suspendedBy = special;
-			applySuspended();
-			return;
-		}
-		if (!special && state.suspendedBy) {
-			const previous = state.suspendedBy;
-			state.suspendedBy = null;
-			applySuspended();
-			const chatTab = state.activeTab === "related" ? "related" : "comments";
-			switchTab(previous === "chat" ? chatTab : state.tabBeforeSpecialPanel, { keepSaved: true });
-			return;
-		}
-		if (special && special !== state.suspendedBy) state.suspendedBy = special;
-		applySuspended();
-	}
-	function holdForFullscreen() {
-		if (!state.root || state.fullscreenHeld) return;
-		saveActiveScrollTop();
-		state.fullscreenHeld = true;
-		applySuspended();
-	}
-	function releaseFullscreenHold() {
-		const heldBySpecialPanel = Boolean(state.suspendedBy);
-		state.fullscreenHeld = false;
-		syncSpecialPanel();
-		if (!heldBySpecialPanel && !state.suspendedBy) switchTab(state.activeTab, { keepSaved: true });
-	}
 	function observeSpecialPanels() {
 		state.specialObserver?.disconnect();
 		const inner = state.watch?.querySelector(SELECTORS.secondaryInner);
@@ -771,7 +827,7 @@
 			pending = true;
 			requestAnimationFrame(() => {
 				pending = false;
-				if (generation === state.generation) syncSpecialPanel();
+				if (generation === state.generation) advanceLifecycle();
 			});
 		});
 		state.specialObserver.observe(inner, {
@@ -784,7 +840,6 @@
 			childList: true,
 			subtree: true
 		});
-		syncSpecialPanel();
 	}
 	function findNativeRelated(watch) {
 		const secondaryInner = watch?.querySelector(SELECTORS.secondaryInner);
@@ -805,36 +860,36 @@
 			if (generation === state.generation && state.activeTab === "related" && state.relatedPane) state.relatedPane.scrollTop = savedScrollTop;
 		});
 	}
-	function mount(watch) {
-		if (state.root?.isConnected) return;
-		const secondaryInner = watch.querySelector(SELECTORS.secondaryInner);
+	function applyHeld(held) {
+		document.documentElement.classList.toggle(HELD_CLASS, held);
+		state.root.dataset.suspended = String(held);
+	}
+	function mount(watch, initialTab) {
+		const secondaryInner = watch?.querySelector(SELECTORS.secondaryInner);
 		const related = findNativeRelated(watch);
-		if (!secondaryInner || !related) return;
+		if (!secondaryInner || !related) return false;
 		state.generation += 1;
 		const generation = state.generation;
 		state.watch = watch;
 		state.videoId = readVideoId();
-		const initialTab = state.lastTab?.videoId === state.videoId ? state.lastTab.tab : "comments";
-		state.lastTab = null;
 		state.activeTab = initialTab;
 		state.scrollTop = {
 			comments: 0,
 			related: 0
 		};
 		state.commentsReady = false;
-		state.suspendedBy = null;
-		state.fullscreenHeld = false;
-		state.tabBeforeSpecialPanel = "comments";
 		const root = buildRoot();
 		state.relatedMarker = marker("related-home");
 		related.parentNode.insertBefore(state.relatedMarker, related);
 		related.parentNode.insertBefore(root, related);
 		state.relatedPane.appendChild(related);
 		state.relatedNode = related;
-		document.documentElement.classList.add(`${SCRIPT_ID}-active`);
+		document.documentElement.classList.add(ACTIVE_CLASS);
+		applyHeld(false);
 		switchTab(initialTab, { reset: true });
 		observeSpecialPanels();
 		waitForComments(generation);
+		return true;
 	}
 	function restoreNode(node, homeMarker, kind, beforeNode = null) {
 		const watch = state.watch;
@@ -875,16 +930,11 @@
 		state.commentsObserver?.disconnect();
 		state.specialObserver = null;
 		state.commentsObserver = null;
-		if (state.root && state.videoId) state.lastTab = {
-			videoId: state.videoId,
-			tab: state.activeTab
-		};
-		saveActiveScrollTop();
 		const relatedBeforeComments = state.relatedNode && state.relatedNode.nextElementSibling === state.commentsNode ? state.commentsNode : null;
 		restoreNode(state.commentsNode, state.commentsMarker, "comments");
 		restoreNode(state.relatedNode, state.relatedMarker, "related", relatedBeforeComments);
 		state.root?.remove();
-		document.documentElement.classList.remove(`${SCRIPT_ID}-active`, `${SCRIPT_ID}-suspended`);
+		document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS);
 		state.generation += 1;
 		state.root = null;
 		state.commentsPane = null;
@@ -897,26 +947,34 @@
 		state.commentsReady = false;
 		state.videoId = null;
 		state.watch = null;
-		state.suspendedBy = null;
-		state.fullscreenHeld = false;
+	}
+	var reflectors = {
+		teardown,
+		mount: (effect, watch) => mount(watch, effect.tab),
+		saveScroll: () => saveActiveScrollTop(),
+		hide: () => applyHeld(true),
+		unhide: () => applyHeld(false),
+		restoreTab: () => switchTab(state.activeTab, { keepSaved: true })
+	};
+	function advanceLifecycle(facts = {}) {
+		const { watch, observation } = observe();
+		const { state: next, effects } = step(state.lifecycle, {
+			...observation,
+			...facts
+		});
+		for (const effect of effects) if (reflectors[effect.type](effect, watch) === false) {
+			state.lifecycle = mountFailed(next);
+			return;
+		}
+		state.lifecycle = next;
 	}
 	function evaluate() {
 		addStyles();
-		const watch = currentWatch();
 		refreshLabels();
-		const nextVideoId = readVideoId();
-		const wrongGeneration = state.root && (state.watch !== watch || state.videoId !== nextVideoId || !watchMatchesUrl(watch));
-		const brokenRoot = state.root && (!state.root.isConnected || state.root.parentNode !== watch?.querySelector(SELECTORS.secondaryInner) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane));
-		const eligible = isEligible(watch);
-		const holdFullscreen = Boolean(state.root && !wrongGeneration && !brokenRoot && isFullscreen(watch));
-		if (holdFullscreen) holdForFullscreen();
-		else if (wrongGeneration || brokenRoot || state.root && !eligible) teardown();
-		if (!state.root && eligible) mount(watch);
+		advanceLifecycle();
 		if (state.root) {
-			if (state.fullscreenHeld && !holdFullscreen) releaseFullscreenHold();
 			syncReplacedComments();
 			syncReplacedRelated();
-			syncSpecialPanel();
 			syncScrollbarInsets();
 		}
 	}
@@ -962,17 +1020,15 @@
 		});
 	}
 	function onNavigateStart() {
-		teardown();
-		state.lastTab = null;
+		advanceLifecycle({ navigating: true });
 		scheduleEvaluation(150);
 	}
 	function onFullscreenChange() {
-		if (document.fullscreenElement && state.root && state.videoId === readVideoId()) holdForFullscreen();
+		if (document.fullscreenElement) advanceLifecycle({ fullscreen: true });
 		scheduleEvaluation(0);
 	}
 	function onUrlChanged() {
-		const nextVideoId = readVideoId();
-		if (state.root && state.videoId !== nextVideoId) teardown();
+		advanceLifecycle();
 		scheduleEvaluation(0);
 	}
 	function boot() {

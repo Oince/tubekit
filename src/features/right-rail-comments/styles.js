@@ -1,4 +1,5 @@
 import { SCRIPT_ID } from './constants.js';
+import { HELD_STYLES, SHOWN_SCOPE } from './lifecycle.js';
 
 export function addStyles() {
   if (document.getElementById(`${SCRIPT_ID}-styles`)) return;
@@ -6,7 +7,7 @@ export function addStyles() {
   const style = document.createElement('style');
   style.id = `${SCRIPT_ID}-styles`;
   style.textContent = `
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary {
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
@@ -19,7 +20,7 @@ export function addStyles() {
       overflow-y: clip !important;
     }
 
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner {
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -29,8 +30,8 @@ export function addStyles() {
       overflow-y: clip !important;
     }
 
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner > #related,
-    html.${SCRIPT_ID}-active:not(.${SCRIPT_ID}-suspended) ytd-watch-flexy #secondary-inner > ytd-watch-next-secondary-results-renderer#related {
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > #related,
+    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > ytd-watch-next-secondary-results-renderer#related {
       display: none !important;
     }
 
@@ -65,9 +66,7 @@ export function addStyles() {
       --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #0f0f0f));
     }
 
-    #${SCRIPT_ID}-root[data-suspended='true'] {
-      display: none !important;
-    }
+    ${HELD_STYLES}
 
     #${SCRIPT_ID}-tabs {
       position: relative;
