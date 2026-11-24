@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.7.6
+// @version      0.8.0
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -35,6 +35,7 @@
 	var PRIMARY_SELECTOR = "#primary";
 	var SECONDARY_SELECTOR = "#secondary";
 	var SECONDARY_INNER_SELECTOR = "#secondary-inner";
+	var PANEL_CONTAINER_SELECTORS = ["#panels", "#chat-container"];
 	var RELATED_SELECTORS = ["#related", "ytd-watch-next-secondary-results-renderer#related"];
 	var COMMENTS_SELECTOR = "ytd-comments#comments";
 	var COMMENTS_HOME_SELECTOR = `${PRIMARY_SELECTOR} #below`;
@@ -173,12 +174,114 @@
 	function findCommentsHome(watch) {
 		return watch?.querySelector(COMMENTS_HOME_SELECTOR) || watch?.querySelector("#primary") || null;
 	}
-	function isYoutubePanelOpen(watch) {
+	var CHAT_PANEL = "chat";
+	var ENGAGEMENT_KIND = "engagement";
+	var PANEL_REQUEST_ACTION = "yt-engagement-panel-visible-changed";
+	var PANEL_TITLE_SELECTOR = "ytd-engagement-panel-title-header-renderer [id=\"title-text\"]";
+	var PANEL_CLOSE_SELECTOR = "ytd-engagement-panel-title-header-renderer #visibility-button button";
+	var CHAT_HEADER_SELECTOR = "yt-live-chat-header-renderer";
+	var CHAT_TITLE_SELECTORS = ["#label-text", "#title"];
+	var CHAT_CLOSE_SELECTOR = `${CHAT_HEADER_SELECTOR} #close-button button`;
+	function isDisplayed(node) {
+		return node.getClientRects().length > 0;
+	}
+	function findYoutubePanels(watch) {
 		const inner = findSecondaryInner(watch);
-		if (!inner) return false;
-		const chat = inner.querySelector(`${CHAT_FRAME_SELECTOR}:not([${CHAT_COLLAPSED_ATTRIBUTE}])`);
-		if (chat && chat.getClientRects().length > 0) return true;
-		return [...inner.querySelectorAll(`${PANEL_SELECTOR}[${PANEL_VISIBILITY_ATTRIBUTE}="${PANEL_EXPANDED_VALUE}"]`)].some((panel) => (panel.getAttribute("target-id") || "") !== PANEL_COMMENTS_TARGET_ID && panel.getClientRects().length > 0);
+		if (!inner) return [];
+		const selector = [`${CHAT_FRAME_SELECTOR}:not([${CHAT_COLLAPSED_ATTRIBUTE}])`, `${PANEL_SELECTOR}[${PANEL_VISIBILITY_ATTRIBUTE}="${PANEL_EXPANDED_VALUE}"]`].join(", ");
+		return [...inner.querySelectorAll(selector)].filter((node) => (node.matches(CHAT_FRAME_SELECTOR) || (node.getAttribute("target-id") || "") !== PANEL_COMMENTS_TARGET_ID) && isDisplayed(node)).map((element) => ({
+			element,
+			kind: element.matches(CHAT_FRAME_SELECTOR) ? CHAT_PANEL : ENGAGEMENT_KIND
+		}));
+	}
+	function findChatFrame(chat) {
+		return chat?.querySelector("iframe") || null;
+	}
+	function frameDocument(frame) {
+		try {
+			return frame?.contentDocument || null;
+		} catch {
+			return null;
+		}
+	}
+	var chatDocument = (chat) => frameDocument(findChatFrame(chat));
+	function textOf(node) {
+		return (node?.textContent || "").replace(/\s+/g, " ").trim();
+	}
+	function youtubePanelTitle(panel) {
+		if (panel.kind === "chat") {
+			const header = chatDocument(panel.element)?.querySelector(CHAT_HEADER_SELECTOR);
+			for (const selector of CHAT_TITLE_SELECTORS) {
+				const title = textOf(header?.querySelector(selector));
+				if (title) return title;
+			}
+			return "";
+		}
+		return textOf(panel.element.querySelector(PANEL_TITLE_SELECTOR));
+	}
+	function closeYoutubePanel(panel) {
+		const button = panel.kind === "chat" ? chatDocument(panel.element)?.querySelector(CHAT_CLOSE_SELECTOR) : panel.element.querySelector(PANEL_CLOSE_SELECTOR);
+		if (!button) return false;
+		button.click();
+		return true;
+	}
+	function watchChatTitle(frame, onChange) {
+		let observer = null;
+		let observed = null;
+		const stopObserving = () => {
+			observer?.disconnect();
+			observer = null;
+			observed = null;
+		};
+		const attach = () => {
+			const doc = frameDocument(frame);
+			const header = doc?.querySelector(CHAT_HEADER_SELECTOR);
+			if (header && header === observed) return;
+			stopObserving();
+			observed = header || doc?.documentElement || null;
+			if (!observed) return;
+			observer = new MutationObserver(() => {
+				if (!header && doc.querySelector(CHAT_HEADER_SELECTOR)) {
+					attach();
+					onChange();
+				} else if (header) onChange();
+			});
+			observer.observe(observed, {
+				childList: true,
+				subtree: true,
+				characterData: true
+			});
+		};
+		const onLoad = () => {
+			attach();
+			onChange();
+		};
+		frame.addEventListener("load", onLoad);
+		attach();
+		return () => {
+			frame.removeEventListener("load", onLoad);
+			stopObserving();
+		};
+	}
+	function watchPanelRequests(onRequest, signal) {
+		document.addEventListener("yt-action", (event) => {
+			const detail = event.detail;
+			if (detail?.actionName !== PANEL_REQUEST_ACTION) return;
+			const data = Array.isArray(detail.args) ? detail.args[0] : null;
+			onRequest({
+				targetId: typeof data?.targetId === "string" ? data.targetId : "",
+				title: data?.header?.engagementPanelTitleHeaderRenderer?.title?.runs?.map((run) => run.text).join("") || ""
+			});
+		}, {
+			capture: true,
+			signal
+		});
+	}
+	function panelOfRequest(panels, { targetId, title }) {
+		const engagement = panels.filter((panel) => panel.kind === ENGAGEMENT_KIND);
+		const byTarget = targetId && engagement.find((panel) => panel.element.getAttribute("target-id") === targetId);
+		if (byTarget) return byTarget;
+		return title && engagement.find((panel) => youtubePanelTitle(panel) === title) || null;
 	}
 	function videoAspectRatio(player) {
 		try {
@@ -660,14 +763,221 @@
 			phase: RELEASED
 		};
 	}
+	var initialPanelSelection = Object.freeze({
+		known: [],
+		selected: null,
+		previous: null
+	});
+	function nextPanelSelection(state, panels, requested = null) {
+		if (panels.length === 0) return initialPanelSelection;
+		const opened = panels.filter((panel) => !state.known.includes(panel));
+		const alive = (panel) => panels.includes(panel) ? panel : null;
+		let selected = alive(state.selected);
+		let previous = alive(state.previous);
+		if (requested && panels.includes(requested)) selected = requested;
+		else if (opened.length > 0 && state.known.length > 0) selected = opened[0];
+		else if (!selected) selected = previous || panels[0];
+		if (selected !== state.selected) previous = alive(state.selected);
+		if (!selected || previous === selected) previous = null;
+		return {
+			known: panels,
+			selected,
+			previous
+		};
+	}
+	var FILL_CLASS = `${SCRIPT_ID}-youtube-panels`;
+	var PANEL_ATTRIBUTE = `data-${SCRIPT_ID}-panel`;
+	var YOUTUBE_TABS_ID = `${SCRIPT_ID}-youtube-tabs`;
+	var TAB_CLASS = `${SCRIPT_ID}-tab`;
+	var CLOSE_ALL_CLASS = `${SCRIPT_ID}-close-all`;
+	function handleTabKeys(event, tablist, select) {
+		const buttons = [...tablist.querySelectorAll("[role=\"tab\"]")];
+		const index = buttons.indexOf(document.activeElement);
+		if (index < 0) return;
+		let next;
+		if (event.key === "ArrowRight") next = (index + 1) % buttons.length;
+		else if (event.key === "ArrowLeft") next = (index + buttons.length - 1) % buttons.length;
+		else if (event.key === "Home") next = 0;
+		else if (event.key === "End") next = buttons.length - 1;
+		else return;
+		event.preventDefault();
+		select(buttons[next]);
+		buttons[next].focus();
+	}
+	function createYoutubePanels({ labels, onTitleChange }) {
+		let selection = initialPanelSelection;
+		let panels = [];
+		let row = null;
+		let chatWatch = null;
+		let watchedFrame = null;
+		let tabButtons = new Map();
+		let closeAll = null;
+		let marked = new Set();
+		const titleOf = (panel) => youtubePanelTitle(panel) || (panel.kind === "chat" ? labels().chat : labels().panel);
+		function stopChatWatch() {
+			chatWatch?.();
+			chatWatch = null;
+			watchedFrame = null;
+		}
+		function watchChat(chat) {
+			const frame = findChatFrame(chat?.element);
+			if (frame === watchedFrame) return;
+			stopChatWatch();
+			if (!frame) return;
+			watchedFrame = frame;
+			chatWatch = watchChatTitle(frame, onTitleChange);
+		}
+		function removeRow() {
+			row?.remove();
+			row = null;
+			tabButtons = new Map();
+			closeAll = null;
+		}
+		function clearMarks() {
+			marked.forEach((node) => node.removeAttribute(PANEL_ATTRIBUTE));
+			marked = new Set();
+		}
+		function select(panel) {
+			selection = nextPanelSelection(selection, panels.map((entry) => entry.element), panel?.element || null);
+			mark();
+			refreshRow();
+		}
+		function mark() {
+			for (const node of marked) if (!panels.some((panel) => panel.element === node)) {
+				node.removeAttribute(PANEL_ATTRIBUTE);
+				marked.delete(node);
+			}
+			for (const panel of panels) {
+				marked.add(panel.element);
+				const value = panel.element === selection.selected ? "shown" : "hidden";
+				if (panel.element.getAttribute(PANEL_ATTRIBUTE) !== value) panel.element.setAttribute(PANEL_ATTRIBUTE, value);
+			}
+		}
+		function buildRow() {
+			const tablist = document.createElement("div");
+			tablist.id = YOUTUBE_TABS_ID;
+			tablist.setAttribute("role", "tablist");
+			tablist.addEventListener("keydown", (event) => handleTabKeys(event, tablist, (button) => {
+				const panel = panels.find((entry) => tabButtons.get(entry.element) === button);
+				if (panel) select(panel);
+			}));
+			return tablist;
+		}
+		function buildTab(panel) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = TAB_CLASS;
+			button.setAttribute("role", "tab");
+			button.addEventListener("click", () => select(panel));
+			return button;
+		}
+		function buildCloseAll() {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = CLOSE_ALL_CLASS;
+			button.addEventListener("click", () => {
+				for (const panel of panels) closeYoutubePanel(panel);
+			});
+			return button;
+		}
+		function refreshRow() {
+			if (!row) return;
+			for (const panel of panels) {
+				const button = tabButtons.get(panel.element);
+				if (!button) continue;
+				const title = titleOf(panel);
+				if (button.textContent !== title) button.textContent = title;
+				if (button.title !== title) button.title = title;
+				const selected = panel.element === selection.selected;
+				button.setAttribute("aria-selected", String(selected));
+				button.tabIndex = selected ? 0 : -1;
+			}
+			const closeLabel = labels().closeAll;
+			if (closeAll.textContent !== closeLabel) closeAll.textContent = closeLabel;
+		}
+		function syncRow(inner) {
+			if (panels.length < 2) {
+				removeRow();
+				return;
+			}
+			if (!row) {
+				row = buildRow();
+				closeAll = buildCloseAll();
+				row.append(closeAll);
+			}
+			for (const [element, button] of tabButtons) if (!panels.some((panel) => panel.element === element)) {
+				button.remove();
+				tabButtons.delete(element);
+			}
+			let cursor = row.firstElementChild;
+			for (const panel of panels) {
+				let button = tabButtons.get(panel.element);
+				if (!button) {
+					button = buildTab(panel);
+					tabButtons.set(panel.element, button);
+				}
+				if (button !== cursor) row.insertBefore(button, cursor || closeAll);
+				cursor = button.nextElementSibling;
+			}
+			if (row.parentNode !== inner || inner.firstElementChild !== row) inner.prepend(row);
+			refreshRow();
+		}
+		function detach() {
+			stopChatWatch();
+			removeRow();
+			clearMarks();
+			selection = {
+				...selection,
+				previous: null
+			};
+		}
+		return {
+			get row() {
+				return row;
+			},
+			contains(node) {
+				return Boolean(row && node && row.contains(node));
+			},
+			sync(watch, found, { filling, fullscreen, request }) {
+				const inner = findSecondaryInner(watch);
+				panels = found;
+				if (!filling || !inner) {
+					detach();
+					if (found.length === 0 && !fullscreen) selection = initialPanelSelection;
+					return;
+				}
+				const requested = request ? panelOfRequest(found, request)?.element || null : null;
+				selection = nextPanelSelection(selection, found.map((panel) => panel.element), requested);
+				watchChat(found.find((panel) => panel.kind === CHAT_PANEL));
+				mark();
+				syncRow(inner);
+			},
+			refreshTitles() {
+				refreshRow();
+			},
+			release() {
+				detach();
+				panels = [];
+			},
+			forget() {
+				selection = initialPanelSelection;
+			}
+		};
+	}
 	var TWO_COLUMN_SCOPE = `${SHOWN_SCOPE} ${TWO_COLUMN_SELECTOR}`;
+	var FILL_SCOPE = `html.${ACTIVE_CLASS}.${FILL_CLASS} ${TWO_COLUMN_SELECTOR}`;
 	var ROOT_SELECTOR = `#${SCRIPT_ID}-root`;
+	var TABS_SELECTOR = `#${YOUTUBE_TABS_ID}`;
+	var INNER_IN_FILL = `${FILL_SCOPE} ${SECONDARY_INNER_SELECTOR}`;
+	var SHOWN_MARK = `[${PANEL_ATTRIBUTE}='shown']`;
+	var HIDDEN_MARK = `[${PANEL_ATTRIBUTE}='hidden']`;
+	var inBothScopes = (selector) => `${TWO_COLUMN_SCOPE} ${selector},\n    ${FILL_SCOPE} ${selector}`;
 	function addStyles() {
 		if (document.getElementById(`tubekit-styles`)) return;
 		const style = document.createElement("style");
 		style.id = `${SCRIPT_ID}-styles`;
 		style.textContent = `
-    ${TWO_COLUMN_SCOPE} ${SECONDARY_SELECTOR} {
+    ${inBothScopes(SECONDARY_SELECTOR)} {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
@@ -680,7 +990,7 @@
       overflow-y: clip !important;
     }
 
-    ${TWO_COLUMN_SCOPE} ${SECONDARY_INNER_SELECTOR} {
+    ${inBothScopes(SECONDARY_INNER_SELECTOR)} {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -694,7 +1004,8 @@
       display: none !important;
     }
 
-    #${SCRIPT_ID}-root {
+    #${SCRIPT_ID}-root,
+    ${TABS_SELECTOR} {
       --${SCRIPT_ID}-bg: var(--yt-sys-color-baseline--base-background, var(--yt-spec-base-background, #fff));
       --${SCRIPT_ID}-text: var(--yt-sys-color-baseline--text-primary, var(--yt-spec-text-primary, #0f0f0f));
       --${SCRIPT_ID}-text-secondary: var(--yt-sys-color-baseline--text-secondary, var(--yt-spec-text-secondary, #606060));
@@ -703,6 +1014,9 @@
       --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1)));
       --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #0f0f0f);
       --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #fff));
+    }
+
+    #${SCRIPT_ID}-root {
       box-sizing: border-box;
       display: flex;
       flex: 1 1 auto;
@@ -713,7 +1027,8 @@
       background: var(--${SCRIPT_ID}-bg);
     }
 
-    html[dark] #${SCRIPT_ID}-root {
+    html[dark] #${SCRIPT_ID}-root,
+    html[dark] ${TABS_SELECTOR} {
       color-scheme: dark;
       --${SCRIPT_ID}-bg: var(--yt-sys-color-baseline--base-background, var(--yt-spec-base-background, #0f0f0f));
       --${SCRIPT_ID}-text: var(--yt-sys-color-baseline--text-primary, var(--yt-spec-text-primary, #f1f1f1));
@@ -765,6 +1080,79 @@
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-selected);
       font-weight: 600;
+    }
+
+    ${TABS_SELECTOR} {
+      position: relative;
+      z-index: 2;
+      display: none;
+      flex: 0 0 auto;
+      gap: 4px;
+      padding: 0 0 8px;
+      margin: 0;
+      background: var(--${SCRIPT_ID}-bg);
+      border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
+    }
+
+    ${FILL_SCOPE} ${TABS_SELECTOR} {
+      display: flex;
+    }
+
+    ${TABS_SELECTOR} .${SCRIPT_ID}-tab {
+      flex: 1 1 0;
+    }
+
+    .${SCRIPT_ID}-close-all {
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      height: 38px;
+      padding: 0 12px;
+      color: var(--${SCRIPT_ID}-text-secondary);
+      font: 500 14px/38px Roboto, Arial, sans-serif;
+      white-space: nowrap;
+      cursor: pointer;
+      background: transparent;
+      border: 0;
+      border-radius: 8px;
+    }
+
+    .${SCRIPT_ID}-close-all:hover {
+      background: var(--${SCRIPT_ID}-hover);
+    }
+
+    ${PANEL_CONTAINER_SELECTORS.map((container) => `${INNER_IN_FILL} > ${container}`).join(",\n    ")} {
+      display: flex !important;
+      flex: 0 0 0 !important;
+      flex-direction: column !important;
+      min-height: 0 !important;
+      height: 0 !important;
+      margin: 0 !important;
+      overflow: visible !important;
+    }
+
+    ${PANEL_CONTAINER_SELECTORS.map((container) => `${INNER_IN_FILL} > ${container}:has(${SHOWN_MARK})`).join(",\n    ")} {
+      flex: 1 1 0 !important;
+      height: auto !important;
+    }
+
+    ${INNER_IN_FILL} ${SHOWN_MARK} {
+      flex: 1 1 0 !important;
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      margin: 0 !important;
+    }
+
+    ${INNER_IN_FILL} ${HIDDEN_MARK} {
+      position: absolute !important;
+      width: 100% !important;
+      height: 0 !important;
+      min-height: 0 !important;
+      max-height: 0 !important;
+      margin: 0 !important;
+      overflow: hidden !important;
+      pointer-events: none !important;
+      visibility: hidden !important;
     }
 
     #${SCRIPT_ID}-body {
@@ -908,6 +1296,9 @@
 		},
 		lifecycle: initialLifecycle,
 		youtubePanelOpen: false,
+		youtubePanelList: [],
+		panelRequest: null,
+		panelSelectionVideoId: null,
 		evaluationTimer: 0,
 		lastPaneScrollAt: 0,
 		statusShown: false,
@@ -923,16 +1314,28 @@
 			loading: "댓글을 불러오는 중…",
 			loadFailed: "댓글을 불러오지 못했습니다.",
 			retry: "다시 시도",
-			unavailable: "이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다."
+			unavailable: "이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다.",
+			closeAll: "모두 닫기",
+			chat: "채팅",
+			panel: "패널"
 		} : {
 			comments: "Comments",
 			related: "Related videos",
 			loading: "Loading comments…",
 			loadFailed: "Comments could not be loaded.",
 			retry: "Retry",
-			unavailable: "Comments are unavailable for this video. Showing related videos."
+			unavailable: "Comments are unavailable for this video. Showing related videos.",
+			closeAll: "Close all",
+			chat: "Chat",
+			panel: "Panel"
 		};
 	};
+	var youtubePanels = createYoutubePanels({
+		labels,
+		onTitleChange: () => youtubePanels.refreshTitles()
+	});
+	var isOwnNode = (node) => node.id === YOUTUBE_TABS_ID;
+	var isOwnInsertion = (record) => record.type === "childList" && [...record.addedNodes, ...record.removedNodes].every(isOwnNode);
 	function isRootBroken(watch) {
 		return !state.root.isConnected || state.root.parentNode !== findSecondaryInner(watch) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane);
 	}
@@ -952,9 +1355,14 @@
 		const brokenRoot = mounted && isRootBroken(watch);
 		const phase = state.lifecycle.phase;
 		const mayReveal = twoColumn && (phase === "released" || wrongGeneration || brokenRoot || phase === "held" && !fullscreen && !state.youtubePanelOpen);
-		if (measurePanel || mayReveal) state.youtubePanelOpen = isYoutubePanelOpen(watch);
+		const measured = Boolean(measurePanel || mayReveal);
+		if (measured) {
+			state.youtubePanelList = findYoutubePanels(watch);
+			state.youtubePanelOpen = state.youtubePanelList.length > 0;
+		}
 		return {
 			watch,
+			measured,
 			observation: {
 				videoId: videoAddress ? urlVideoId() : null,
 				twoColumn,
@@ -1017,20 +1425,7 @@
 			button.addEventListener("click", () => switchTab(tabName));
 			tabs.appendChild(button);
 		}
-		tabs.addEventListener("keydown", (event) => {
-			const buttons = [...tabs.querySelectorAll("[role=\"tab\"]")];
-			const index = buttons.indexOf(document.activeElement);
-			if (index < 0) return;
-			let next;
-			if (event.key === "ArrowRight") next = (index + 1) % buttons.length;
-			else if (event.key === "ArrowLeft") next = (index + buttons.length - 1) % buttons.length;
-			else if (event.key === "Home") next = 0;
-			else if (event.key === "End") next = buttons.length - 1;
-			else return;
-			event.preventDefault();
-			switchTab(buttons[next].dataset.tab);
-			buttons[next].focus();
-		});
+		tabs.addEventListener("keydown", (event) => handleTabKeys(event, tabs, (button) => switchTab(button.dataset.tab)));
 		const body = document.createElement("div");
 		body.id = `${SCRIPT_ID}-body`;
 		const commentsPane = document.createElement("div");
@@ -1164,7 +1559,7 @@
 		const generation = state.generation;
 		let pending = false;
 		state.specialObserver = new MutationObserver((records) => {
-			if (pending || state.root && records.every((record) => !record.target.isConnected || state.root.contains(record.target))) return;
+			if (pending || state.root && records.every((record) => !record.target.isConnected || state.root.contains(record.target) || youtubePanels.contains(record.target) || isOwnInsertion(record))) return;
 			pending = true;
 			requestAnimationFrame(() => {
 				pending = false;
@@ -1199,6 +1594,9 @@
 		state.generation += 1;
 		state.watch = watch;
 		state.videoId = urlVideoId();
+		if (state.panelSelectionVideoId !== null && state.panelSelectionVideoId !== state.videoId) forgetPanelSelection();
+		else if (state.panelSelectionVideoId === null) youtubePanels.forget();
+		state.panelSelectionVideoId = state.videoId;
 		state.activeTab = initialTab;
 		state.scrollTop = {
 			comments: 0,
@@ -1228,6 +1626,7 @@
 		state.specialObserver?.disconnect();
 		state.specialObserver = null;
 		state.commentsLoader?.dispose();
+		youtubePanels.release();
 		const comments = state.commentsRegion;
 		const related = state.relatedRegion;
 		const relatedBeforeComments = related?.node && related.node.nextElementSibling === comments?.node ? comments.node : null;
@@ -1237,7 +1636,7 @@
 			before: relatedBeforeComments
 		});
 		state.root?.remove();
-		document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS);
+		document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS, FILL_CLASS);
 		state.generation += 1;
 		state.root = null;
 		state.commentsPane = null;
@@ -1256,17 +1655,43 @@
 		unhide: () => applyHeld(false),
 		restoreTab: () => switchTab(state.activeTab, { keepSaved: true })
 	};
+	function syncYoutubePanels(watch, phase, observation, measured) {
+		if (!state.root || !measured) return;
+		const filling = phase === "held" && state.youtubePanelList.length > 0 && !observation.fullscreen;
+		document.documentElement.classList.toggle(FILL_CLASS, filling);
+		youtubePanels.sync(watch, state.youtubePanelList, {
+			filling,
+			fullscreen: observation.fullscreen,
+			request: state.panelRequest
+		});
+		state.panelRequest = null;
+	}
+	function forgetPanelSelection() {
+		youtubePanels.forget();
+		state.panelRequest = null;
+	}
+	function forgetStalePanelSelection(videoId) {
+		if (state.root || state.panelSelectionVideoId === null || state.panelSelectionVideoId === videoId) return;
+		forgetPanelSelection();
+		state.panelSelectionVideoId = null;
+	}
 	function advanceLifecycle(facts = {}, { measurePanel = true } = {}) {
-		const { watch, observation } = observe(measurePanel);
+		const { watch, observation, measured } = observe(measurePanel);
 		const { state: next, effects } = step(state.lifecycle, {
 			...observation,
 			...facts
 		});
 		for (const effect of effects) if (reflectors[effect.type](effect, watch) === false) {
 			state.lifecycle = mountFailed(next);
+			forgetStalePanelSelection(observation.videoId);
 			return;
 		}
 		state.lifecycle = next;
+		forgetStalePanelSelection(observation.videoId);
+		syncYoutubePanels(watch, next.phase, {
+			...observation,
+			...facts
+		}, measured);
 	}
 	function evaluate() {
 		addStyles();
@@ -1282,10 +1707,10 @@
 	function isInsideAdoptedContent(node) {
 		return Boolean(state.commentsRegion?.contains(node) || state.relatedRegion?.contains(node));
 	}
-	var isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
+	var isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || youtubePanels.contains(node) || isPlayerArea(node);
 	var isIdleOffWatch = () => !state.root && !isVideoPage();
 	var isOtherHiddenChange = (record) => record.type === "attributes" && record.attributeName === "hidden" && record.target !== state.watch;
-	var onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target) || isOtherHiddenChange(record));
+	var onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target) || isOtherHiddenChange(record) || isOwnInsertion(record));
 	function onAppMutations(records) {
 		if (isIdleOffWatch() || onlyIrrelevantChanges(records)) return;
 		advanceLifecycle({}, { measurePanel: false });
@@ -1353,6 +1778,10 @@
 			passive: true,
 			signal
 		});
+		watchPanelRequests((request) => {
+			state.panelRequest = request;
+			scheduleEvaluation(0);
+		}, signal);
 		document.addEventListener("DOMContentLoaded", () => {
 			retargetObserver();
 			scheduleEvaluation(0);
@@ -1366,6 +1795,7 @@
 			state.appObserver?.disconnect();
 			state.commentsLoader?.dispose();
 			state.specialObserver?.disconnect();
+			youtubePanels.release();
 		};
 	}
 	var right_rail_comments_default = {

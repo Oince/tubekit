@@ -3,12 +3,14 @@ import { FAILED, LOADED, LOADING, OFF, createCommentsLoader } from './comments-l
 import { SCRIPT_ID } from './constants.js';
 import { ACTIVE_CLASS, HELD, HELD_CLASS, RELEASED, initialLifecycle, mountFailed, step } from './lifecycle.js';
 import { addStyles } from './styles.js';
+import { FILL_CLASS, YOUTUBE_TABS_ID, createYoutubePanels, handleTabKeys } from './youtube-panels.js';
 import {
   SCREEN_ATTRIBUTES,
   WATCH_HIDDEN_ATTRIBUTE,
   YOUTUBE_PANEL_ATTRIBUTES,
   findApp,
   findNativeRelated,
+  findYoutubePanels,
   findSecondaryInner,
   findWatch,
   isBrowserFullscreen,
@@ -19,10 +21,10 @@ import {
   isTwoColumnScreenLeft,
   isWatchHidden,
   isVideoPage,
-  isYoutubePanelOpen,
   pageFollowsUrl,
   pageVideoId,
   urlVideoId,
+  watchPanelRequests,
 } from '../../core/youtube.js';
 
 const SAFARI_OVERLAY_SCROLLBAR_HOVER_WIDTH = 11;
@@ -46,6 +48,9 @@ const state = {
   scrollTop: { comments: 0, related: 0 },
   lifecycle: initialLifecycle,
   youtubePanelOpen: false,
+  youtubePanelList: [],
+  panelRequest: null,
+  panelSelectionVideoId: null,
   evaluationTimer: 0,
   lastPaneScrollAt: 0,
   statusShown: false,
@@ -65,6 +70,9 @@ const labels = () => {
         loadFailed: '댓글을 불러오지 못했습니다.',
         retry: '다시 시도',
         unavailable: '이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다.',
+        closeAll: '모두 닫기',
+        chat: '채팅',
+        panel: '패널',
       }
     : {
         comments: 'Comments',
@@ -73,8 +81,19 @@ const labels = () => {
         loadFailed: 'Comments could not be loaded.',
         retry: 'Retry',
         unavailable: 'Comments are unavailable for this video. Showing related videos.',
+        closeAll: 'Close all',
+        chat: 'Chat',
+        panel: 'Panel',
       };
 };
+
+const youtubePanels = createYoutubePanels({ labels, onTitleChange: () => youtubePanels.refreshTitles() });
+
+const isOwnNode = (node) => node.id === YOUTUBE_TABS_ID;
+
+const isOwnInsertion = (record) => (
+  record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every(isOwnNode)
+);
 
 function isRootBroken(watch) {
   return !state.root.isConnected ||
@@ -104,9 +123,14 @@ function observe(measurePanel) {
     brokenRoot ||
     (phase === HELD && !fullscreen && !state.youtubePanelOpen)
   );
-  if (measurePanel || mayReveal) state.youtubePanelOpen = isYoutubePanelOpen(watch);
+  const measured = Boolean(measurePanel || mayReveal);
+  if (measured) {
+    state.youtubePanelList = findYoutubePanels(watch);
+    state.youtubePanelOpen = state.youtubePanelList.length > 0;
+  }
   return {
     watch,
+    measured,
     observation: {
       videoId: videoAddress ? urlVideoId() : null,
       twoColumn,
@@ -174,20 +198,7 @@ function buildRoot() {
     tabs.appendChild(button);
   }
 
-  tabs.addEventListener('keydown', (event) => {
-    const buttons = [...tabs.querySelectorAll('[role="tab"]')];
-    const index = buttons.indexOf(document.activeElement);
-    if (index < 0) return;
-    let next;
-    if (event.key === 'ArrowRight') next = (index + 1) % buttons.length;
-    else if (event.key === 'ArrowLeft') next = (index + buttons.length - 1) % buttons.length;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = buttons.length - 1;
-    else return;
-    event.preventDefault();
-    switchTab(buttons[next].dataset.tab);
-    buttons[next].focus();
-  });
+  tabs.addEventListener('keydown', (event) => handleTabKeys(event, tabs, (button) => switchTab(button.dataset.tab)));
 
   const body = document.createElement('div');
   body.id = `${SCRIPT_ID}-body`;
@@ -344,7 +355,7 @@ function observeSpecialPanels() {
   const generation = state.generation;
   let pending = false;
   state.specialObserver = new MutationObserver((records) => {
-    if (pending || (state.root && records.every((record) => !record.target.isConnected || state.root.contains(record.target)))) return;
+    if (pending || (state.root && records.every((record) => !record.target.isConnected || state.root.contains(record.target) || youtubePanels.contains(record.target) || isOwnInsertion(record)))) return;
     pending = true;
     requestAnimationFrame(() => {
       pending = false;
@@ -390,6 +401,9 @@ function mount(watch, initialTab) {
   state.generation += 1;
   state.watch = watch;
   state.videoId = urlVideoId();
+  if (state.panelSelectionVideoId !== null && state.panelSelectionVideoId !== state.videoId) forgetPanelSelection();
+  else if (state.panelSelectionVideoId === null) youtubePanels.forget();
+  state.panelSelectionVideoId = state.videoId;
   state.activeTab = initialTab;
   state.scrollTop = { comments: 0, related: 0 };
 
@@ -419,6 +433,7 @@ function teardown() {
   state.specialObserver?.disconnect();
   state.specialObserver = null;
   state.commentsLoader?.dispose();
+  youtubePanels.release();
 
   const comments = state.commentsRegion;
   const related = state.relatedRegion;
@@ -427,7 +442,7 @@ function teardown() {
   comments?.restore(state.watch, { videoId: pageVideoId(state.watch) });
   related?.restore(state.watch, { videoId: pageVideoId(state.watch), before: relatedBeforeComments });
   state.root?.remove();
-  document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS);
+  document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS, FILL_CLASS);
 
   state.generation += 1;
   state.root = null;
@@ -449,16 +464,38 @@ const reflectors = {
   restoreTab: () => switchTab(state.activeTab, { keepSaved: true }),
 };
 
+function syncYoutubePanels(watch, phase, observation, measured) {
+  if (!state.root || !measured) return;
+  const filling = phase === HELD && state.youtubePanelList.length > 0 && !observation.fullscreen;
+  document.documentElement.classList.toggle(FILL_CLASS, filling);
+  youtubePanels.sync(watch, state.youtubePanelList, { filling, fullscreen: observation.fullscreen, request: state.panelRequest });
+  state.panelRequest = null;
+}
+
+function forgetPanelSelection() {
+  youtubePanels.forget();
+  state.panelRequest = null;
+}
+
+function forgetStalePanelSelection(videoId) {
+  if (state.root || state.panelSelectionVideoId === null || state.panelSelectionVideoId === videoId) return;
+  forgetPanelSelection();
+  state.panelSelectionVideoId = null;
+}
+
 function advanceLifecycle(facts = {}, { measurePanel = true } = {}) {
-  const { watch, observation } = observe(measurePanel);
+  const { watch, observation, measured } = observe(measurePanel);
   const { state: next, effects } = step(state.lifecycle, { ...observation, ...facts });
   for (const effect of effects) {
     if (reflectors[effect.type](effect, watch) === false) {
       state.lifecycle = mountFailed(next);
+      forgetStalePanelSelection(observation.videoId);
       return;
     }
   }
   state.lifecycle = next;
+  forgetStalePanelSelection(observation.videoId);
+  syncYoutubePanels(watch, next.phase, { ...observation, ...facts }, measured);
 }
 
 function evaluate() {
@@ -477,7 +514,7 @@ function isInsideAdoptedContent(node) {
   return Boolean(state.commentsRegion?.contains(node) || state.relatedRegion?.contains(node));
 }
 
-const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
+const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || youtubePanels.contains(node) || isPlayerArea(node);
 
 const isIdleOffWatch = () => !state.root && !isVideoPage();
 
@@ -486,7 +523,7 @@ const isOtherHiddenChange = (record) => (
 );
 
 const onlyIrrelevantChanges = (records) => records.every((record) => (
-  isIrrelevantTarget(record.target) || isOtherHiddenChange(record)
+  isIrrelevantTarget(record.target) || isOtherHiddenChange(record) || isOwnInsertion(record)
 ));
 
 function onAppMutations(records) {
@@ -553,6 +590,10 @@ function boot() {
   window.addEventListener('popstate', onUrlChanged, capture);
   window.addEventListener('urlchange', onUrlChanged, capture);
   window.addEventListener('resize', () => scheduleEvaluation(180), { passive: true, signal });
+  watchPanelRequests((request) => {
+    state.panelRequest = request;
+    scheduleEvaluation(0);
+  }, signal);
   document.addEventListener('DOMContentLoaded', () => {
     retargetObserver();
     scheduleEvaluation(0);
@@ -564,6 +605,7 @@ function boot() {
     state.appObserver?.disconnect();
     state.commentsLoader?.dispose();
     state.specialObserver?.disconnect();
+    youtubePanels.release();
   };
 }
 

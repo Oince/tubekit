@@ -1,8 +1,10 @@
 import { SCRIPT_ID } from './constants.js';
-import { HELD_STYLES, SHOWN_SCOPE } from './lifecycle.js';
+import { ACTIVE_CLASS, HELD_STYLES, SHOWN_SCOPE } from './lifecycle.js';
+import { FILL_CLASS, PANEL_ATTRIBUTE, YOUTUBE_TABS_ID } from './youtube-panels.js';
 import {
   COMMENTS_SELECTOR,
   NOT_TWO_COLUMN_SELECTORS,
+  PANEL_CONTAINER_SELECTORS,
   RELATED_SELECTORS,
   SECONDARY_INNER_SELECTOR,
   SECONDARY_SELECTOR,
@@ -10,7 +12,13 @@ import {
 } from '../../core/youtube.js';
 
 const TWO_COLUMN_SCOPE = `${SHOWN_SCOPE} ${TWO_COLUMN_SELECTOR}`;
+const FILL_SCOPE = `html.${ACTIVE_CLASS}.${FILL_CLASS} ${TWO_COLUMN_SELECTOR}`;
 const ROOT_SELECTOR = `#${SCRIPT_ID}-root`;
+const TABS_SELECTOR = `#${YOUTUBE_TABS_ID}`;
+const INNER_IN_FILL = `${FILL_SCOPE} ${SECONDARY_INNER_SELECTOR}`;
+const SHOWN_MARK = `[${PANEL_ATTRIBUTE}='shown']`;
+const HIDDEN_MARK = `[${PANEL_ATTRIBUTE}='hidden']`;
+const inBothScopes = (selector) => `${TWO_COLUMN_SCOPE} ${selector},\n    ${FILL_SCOPE} ${selector}`;
 
 export function addStyles() {
   if (document.getElementById(`${SCRIPT_ID}-styles`)) return;
@@ -18,7 +26,7 @@ export function addStyles() {
   const style = document.createElement('style');
   style.id = `${SCRIPT_ID}-styles`;
   style.textContent = `
-    ${TWO_COLUMN_SCOPE} ${SECONDARY_SELECTOR} {
+    ${inBothScopes(SECONDARY_SELECTOR)} {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
@@ -31,7 +39,7 @@ export function addStyles() {
       overflow-y: clip !important;
     }
 
-    ${TWO_COLUMN_SCOPE} ${SECONDARY_INNER_SELECTOR} {
+    ${inBothScopes(SECONDARY_INNER_SELECTOR)} {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -45,7 +53,8 @@ export function addStyles() {
       display: none !important;
     }
 
-    #${SCRIPT_ID}-root {
+    #${SCRIPT_ID}-root,
+    ${TABS_SELECTOR} {
       --${SCRIPT_ID}-bg: var(--yt-sys-color-baseline--base-background, var(--yt-spec-base-background, #fff));
       --${SCRIPT_ID}-text: var(--yt-sys-color-baseline--text-primary, var(--yt-spec-text-primary, #0f0f0f));
       --${SCRIPT_ID}-text-secondary: var(--yt-sys-color-baseline--text-secondary, var(--yt-spec-text-secondary, #606060));
@@ -54,6 +63,9 @@ export function addStyles() {
       --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1)));
       --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #0f0f0f);
       --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #fff));
+    }
+
+    #${SCRIPT_ID}-root {
       box-sizing: border-box;
       display: flex;
       flex: 1 1 auto;
@@ -64,7 +76,8 @@ export function addStyles() {
       background: var(--${SCRIPT_ID}-bg);
     }
 
-    html[dark] #${SCRIPT_ID}-root {
+    html[dark] #${SCRIPT_ID}-root,
+    html[dark] ${TABS_SELECTOR} {
       color-scheme: dark;
       --${SCRIPT_ID}-bg: var(--yt-sys-color-baseline--base-background, var(--yt-spec-base-background, #0f0f0f));
       --${SCRIPT_ID}-text: var(--yt-sys-color-baseline--text-primary, var(--yt-spec-text-primary, #f1f1f1));
@@ -116,6 +129,79 @@ export function addStyles() {
       color: var(--${SCRIPT_ID}-text);
       background: var(--${SCRIPT_ID}-selected);
       font-weight: 600;
+    }
+
+    ${TABS_SELECTOR} {
+      position: relative;
+      z-index: 2;
+      display: none;
+      flex: 0 0 auto;
+      gap: 4px;
+      padding: 0 0 8px;
+      margin: 0;
+      background: var(--${SCRIPT_ID}-bg);
+      border-bottom: 1px solid var(--${SCRIPT_ID}-outline);
+    }
+
+    ${FILL_SCOPE} ${TABS_SELECTOR} {
+      display: flex;
+    }
+
+    ${TABS_SELECTOR} .${SCRIPT_ID}-tab {
+      flex: 1 1 0;
+    }
+
+    .${SCRIPT_ID}-close-all {
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      height: 38px;
+      padding: 0 12px;
+      color: var(--${SCRIPT_ID}-text-secondary);
+      font: 500 14px/38px Roboto, Arial, sans-serif;
+      white-space: nowrap;
+      cursor: pointer;
+      background: transparent;
+      border: 0;
+      border-radius: 8px;
+    }
+
+    .${SCRIPT_ID}-close-all:hover {
+      background: var(--${SCRIPT_ID}-hover);
+    }
+
+    ${PANEL_CONTAINER_SELECTORS.map(container => `${INNER_IN_FILL} > ${container}`).join(',\n    ')} {
+      display: flex !important;
+      flex: 0 0 0 !important;
+      flex-direction: column !important;
+      min-height: 0 !important;
+      height: 0 !important;
+      margin: 0 !important;
+      overflow: visible !important;
+    }
+
+    ${PANEL_CONTAINER_SELECTORS.map(container => `${INNER_IN_FILL} > ${container}:has(${SHOWN_MARK})`).join(',\n    ')} {
+      flex: 1 1 0 !important;
+      height: auto !important;
+    }
+
+    ${INNER_IN_FILL} ${SHOWN_MARK} {
+      flex: 1 1 0 !important;
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      margin: 0 !important;
+    }
+
+    ${INNER_IN_FILL} ${HIDDEN_MARK} {
+      position: absolute !important;
+      width: 100% !important;
+      height: 0 !important;
+      min-height: 0 !important;
+      max-height: 0 !important;
+      margin: 0 !important;
+      overflow: hidden !important;
+      pointer-events: none !important;
+      visibility: hidden !important;
     }
 
     #${SCRIPT_ID}-body {

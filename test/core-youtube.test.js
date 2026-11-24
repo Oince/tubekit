@@ -1,5 +1,6 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import {
+  CHAT_PANEL,
   COMMENTS_OFF_BY_UPLOADER,
   COMMENTS_OFF_LIVE_LOOK,
   NOT_TWO_COLUMN_SELECTORS,
@@ -7,15 +8,18 @@ import {
   TWO_COLUMN_SELECTOR,
   YOUTUBE_PANEL_ATTRIBUTES,
   availableQualities,
+  closeYoutubePanel,
   commentsHaveLoaded,
   commentsOffCandidate,
   currentVideoId,
   findNativeComments,
   findApp,
+  findChatFrame,
   findCommentsHome,
   findNativeRelated,
   findSecondaryInner,
   findWatch,
+  findYoutubePanels,
   isAdShowing,
   isBrowserFullscreen,
   isEmbedShortsOrChatPage,
@@ -30,6 +34,7 @@ import {
   isWatchHidden,
   isYoutubePanelOpen,
   pageFollowsUrl,
+  panelOfRequest,
   pageVideoId,
   playerFollowsVideo,
   playerOfMediaEvent,
@@ -40,8 +45,11 @@ import {
   videoAspectRatio,
   videoContentRect,
   videoKeywords,
+  watchChatTitle,
+  watchPanelRequests,
+  youtubePanelTitle,
 } from '../src/core/youtube.js';
-import { fakePlayer, loadPage, stubProperty } from './helpers.js';
+import { advance, fakePlayer, loadPage, onCleanup, stubProperty } from './helpers.js';
 
 function playerPage(url = 'https://www.youtube.com/watch?v=A') {
   loadPage({ url, body: '<ytd-watch-flexy video-id="A"><div id="movie_player"><video></video></div></ytd-watch-flexy>' });
@@ -443,4 +451,164 @@ test('the secondary column and the comments home are found by the adapter', () =
   document.querySelector('#below').remove();
   expect(findCommentsHome(full)).toBe(document.querySelector('#primary'));
   expect(findCommentsHome(null)).toBe(null);
+});
+
+const EXPANDED = 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
+
+function engagement(title, targetId, extra = '') {
+  const target = targetId ? ` target-id="${targetId}"` : '';
+  return `<ytd-engagement-panel-section-list-renderer${target} visibility="${EXPANDED}"${extra}><ytd-engagement-panel-title-header-renderer><div id="header"><yt-formatted-string id="title-text">${title}</yt-formatted-string><div id="visibility-button"><button>x</button></div></div></ytd-engagement-panel-title-header-renderer></ytd-engagement-panel-section-list-renderer>`;
+}
+
+function chatDoc(title, { header = true } = {}) {
+  const doc = document.implementation.createHTMLDocument('');
+  if (header) {
+    doc.body.innerHTML = `<yt-live-chat-header-renderer><span id="title"></span><div id="label-text">${title}</div><div id="close-button"><button>x</button></div></yt-live-chat-header-renderer>`;
+  }
+  return doc;
+}
+
+function chatPage(doc) {
+  const watch = panelPage('<div id="chat-container"><ytd-live-chat-frame id="chat"><iframe></iframe></ytd-live-chat-frame></div>');
+  const frame = watch.querySelector('iframe');
+  const holder = { doc };
+  stubProperty(frame, 'contentDocument', { get: () => holder.doc });
+  return { watch, chat: watch.querySelector('ytd-live-chat-frame'), frame, holder };
+}
+
+test('YouTube panels are found in the order YouTube stacks them with their kind, and a panel that is not shown is left out', () => {
+  const watch = panelPage([
+    engagement('Video info', null),
+    engagement('Comments', 'engagement-panel-comments-section'),
+    '<ytd-engagement-panel-section-list-renderer visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"></ytd-engagement-panel-section-list-renderer>',
+    engagement('Questions', 'PAyouchat'),
+    '<div id="chat-container"><ytd-live-chat-frame id="chat"></ytd-live-chat-frame></div>',
+  ].join(''));
+  const found = findYoutubePanels(watch);
+  expect(found.map(panel => panel.kind)).toStrictEqual(['engagement', 'engagement', CHAT_PANEL]);
+  expect(found.map(panel => panel.element.getAttribute('target-id'))).toStrictEqual([null, 'PAyouchat', null]);
+  expect(findYoutubePanels(null)).toStrictEqual([]);
+  expect(findYoutubePanels(panelPage('<ytd-live-chat-frame collapsed></ytd-live-chat-frame>'))).toStrictEqual([]);
+  const unshown = panelPage(engagement('Video info', null));
+  unshown.querySelector('ytd-engagement-panel-section-list-renderer').getClientRects = () => [];
+  expect(findYoutubePanels(unshown)).toStrictEqual([]);
+});
+
+test('an engagement panel is titled by its header, even among panels that repeat the same ids', () => {
+  const watch = panelPage(engagement('Video info', null) + engagement('Questions', 'PAyouchat') + '<ytd-engagement-panel-section-list-renderer visibility="' + EXPANDED + '"></ytd-engagement-panel-section-list-renderer>');
+  const found = findYoutubePanels(watch);
+  expect(found.map(youtubePanelTitle)).toStrictEqual(['Video info', 'Questions', '']);
+});
+
+test('a chat is titled by the header inside its frame, falling back to the plain title, and no title is empty', () => {
+  const { chat, holder } = chatPage(chatDoc('Top chat replay'));
+  const panel = { element: chat, kind: CHAT_PANEL };
+  expect(youtubePanelTitle(panel)).toBe('Top chat replay');
+  holder.doc = chatDoc('');
+  holder.doc.querySelector('#title').textContent = ' Live  chat ';
+  expect(youtubePanelTitle(panel)).toBe('Live chat');
+  holder.doc = chatDoc('', { header: false });
+  expect(youtubePanelTitle(panel)).toBe('');
+  holder.doc = null;
+  expect(youtubePanelTitle(panel)).toBe('');
+  stubProperty(chat.querySelector('iframe'), 'contentDocument', { get: () => { throw new Error('cross-origin'); } });
+  expect(youtubePanelTitle(panel)).toBe('');
+});
+
+test('closing a YouTube panel presses its own close button and reports whether there was one', () => {
+  const watch = panelPage(engagement('Video info', null) + '<ytd-engagement-panel-section-list-renderer visibility="' + EXPANDED + '"></ytd-engagement-panel-section-list-renderer>');
+  const [info, bare] = findYoutubePanels(watch);
+  const clicked = vi.fn();
+  info.element.querySelector('button').addEventListener('click', clicked);
+  expect(closeYoutubePanel(info)).toBe(true);
+  expect(clicked).toHaveBeenCalledTimes(1);
+  expect(closeYoutubePanel(bare)).toBe(false);
+
+  const { chat, holder } = chatPage(chatDoc('Chat'));
+  const chatClicked = vi.fn();
+  holder.doc.querySelector('#close-button button').addEventListener('click', chatClicked);
+  expect(closeYoutubePanel({ element: chat, kind: CHAT_PANEL })).toBe(true);
+  expect(chatClicked).toHaveBeenCalledTimes(1);
+  holder.doc = chatDoc('Chat', { header: false });
+  expect(closeYoutubePanel({ element: chat, kind: CHAT_PANEL })).toBe(false);
+});
+
+test('watching a chat title reports header changes, a reloaded frame and a header that shows up late, until stopped', async () => {
+  const { frame, holder } = chatPage(chatDoc('Top chat replay'));
+  const changed = vi.fn();
+  const stop = watchChatTitle(frame, changed);
+  holder.doc.querySelector('#label-text').textContent = 'Live chat replay';
+  await advance(0);
+  expect(changed).toHaveBeenCalledTimes(1);
+
+  changed.mockClear();
+  holder.doc = chatDoc('', { header: false });
+  frame.dispatchEvent(new Event('load'));
+  expect(changed).toHaveBeenCalledTimes(1);
+  holder.doc.body.innerHTML = '<yt-live-chat-header-renderer><div id="label-text">Late</div></yt-live-chat-header-renderer>';
+  await advance(0);
+  expect(changed).toHaveBeenCalledTimes(2);
+  holder.doc.querySelector('#label-text').textContent = 'Later';
+  await advance(0);
+  expect(changed).toHaveBeenCalledTimes(3);
+
+  stop();
+  changed.mockClear();
+  holder.doc.querySelector('#label-text').textContent = 'After stop';
+  frame.dispatchEvent(new Event('load'));
+  await advance(0);
+  expect(changed).not.toHaveBeenCalled();
+});
+
+test('the frame of a chat is found when it exists, and watching a frame without a readable document waits for its load', () => {
+  const watch = panelPage('<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>');
+  const bare = watch.querySelector('ytd-live-chat-frame');
+  expect(findChatFrame(bare)).toBe(null);
+  expect(findChatFrame(null)).toBe(null);
+  const { chat, frame, holder } = chatPage(null);
+  expect(findChatFrame(chat)).toBe(frame);
+  const changed = vi.fn();
+  const stop = watchChatTitle(frame, changed);
+  holder.doc = chatDoc('Chat');
+  frame.dispatchEvent(new Event('load'));
+  expect(changed).toHaveBeenCalledTimes(1);
+  stop();
+  const empty = chatPage(null);
+  empty.holder.doc = { querySelector: () => null, documentElement: null };
+  const stopEmpty = watchChatTitle(empty.frame, vi.fn());
+  expect(() => stopEmpty()).not.toThrow();
+});
+
+test('requests to open an engagement panel are reported with the panel and its title, and nothing else is', () => {
+  const controller = new AbortController();
+  onCleanup(() => controller.abort());
+  const requests = [];
+  watchPanelRequests(request => requests.push(request), controller.signal);
+  const send = (actionName, args) => document.dispatchEvent(new CustomEvent('yt-action', { detail: { actionName, args } }));
+  send('yt-engagement-panel-visible-changed', [{ targetId: 'info', header: { engagementPanelTitleHeaderRenderer: { title: { runs: [{ text: 'Video ' }, { text: 'info' }] } } } }]);
+  send('yt-engagement-panel-visible-changed', [{}]);
+  send('yt-engagement-panel-visible-changed', undefined);
+  send('yt-navigate', [{ targetId: 'x' }]);
+  document.dispatchEvent(new CustomEvent('yt-action'));
+  expect(requests).toStrictEqual([
+    { targetId: 'info', title: 'Video info' },
+    { targetId: '', title: '' },
+    { targetId: '', title: '' },
+  ]);
+  controller.abort();
+  send('yt-engagement-panel-visible-changed', [{ targetId: 'later' }]);
+  expect(requests).toHaveLength(3);
+});
+
+test('a request finds its panel by target id first, then by title, among engagement panels only', () => {
+  const watch = panelPage(engagement('Video info', 'info') + engagement('Questions', 'PAyouchat') + engagement('Video info', null) + '<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>');
+  const panels = findYoutubePanels(watch);
+  const [info, questions, untargeted] = panels;
+  expect(panelOfRequest(panels, { targetId: 'PAyouchat', title: 'Video info' })).toBe(questions);
+  expect(panelOfRequest(panels, { targetId: 'unknown', title: 'Questions' })).toBe(questions);
+  expect(panelOfRequest(panels, { targetId: '', title: 'Video info' })).toBe(info);
+  expect(untargeted).toBeTruthy();
+  expect(panelOfRequest(panels, { targetId: 'unknown', title: 'Nothing' })).toBe(null);
+  expect(panelOfRequest(panels, { targetId: '', title: '' })).toBe(null);
+  expect(panelOfRequest([], { targetId: 'info', title: '' })).toBe(null);
 });

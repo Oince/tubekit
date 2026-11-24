@@ -15,6 +15,7 @@ const PLAYER_AREA_SELECTOR = `${PLAYER_SELECTOR}, ytd-player`;
 export const PRIMARY_SELECTOR = '#primary';
 export const SECONDARY_SELECTOR = '#secondary';
 export const SECONDARY_INNER_SELECTOR = '#secondary-inner';
+export const PANEL_CONTAINER_SELECTORS = ['#panels', '#chat-container'];
 export const RELATED_SELECTORS = ['#related', 'ytd-watch-next-secondary-results-renderer#related'];
 export const COMMENTS_SELECTOR = 'ytd-comments#comments';
 const COMMENTS_HOME_SELECTOR = `${PRIMARY_SELECTOR} #below`;
@@ -181,17 +182,133 @@ export function findCommentsHome(watch) {
   return watch?.querySelector(COMMENTS_HOME_SELECTOR) || watch?.querySelector(PRIMARY_SELECTOR) || null;
 }
 
-export function isYoutubePanelOpen(watch) {
+export const CHAT_PANEL = 'chat';
+const ENGAGEMENT_KIND = 'engagement';
+const PANEL_REQUEST_ACTION = 'yt-engagement-panel-visible-changed';
+const PANEL_TITLE_SELECTOR = 'ytd-engagement-panel-title-header-renderer [id="title-text"]';
+const PANEL_CLOSE_SELECTOR = 'ytd-engagement-panel-title-header-renderer #visibility-button button';
+const CHAT_HEADER_SELECTOR = 'yt-live-chat-header-renderer';
+const CHAT_TITLE_SELECTORS = ['#label-text', '#title'];
+const CHAT_CLOSE_SELECTOR = `${CHAT_HEADER_SELECTOR} #close-button button`;
+
+function isDisplayed(node) {
+  return node.getClientRects().length > 0;
+}
+
+export function findYoutubePanels(watch) {
   const inner = findSecondaryInner(watch);
-  if (!inner) return false;
+  if (!inner) return [];
 
-  const chat = inner.querySelector(`${CHAT_FRAME_SELECTOR}:not([${CHAT_COLLAPSED_ATTRIBUTE}])`);
-  if (chat && chat.getClientRects().length > 0) return true;
+  const selector = [
+    `${CHAT_FRAME_SELECTOR}:not([${CHAT_COLLAPSED_ATTRIBUTE}])`,
+    `${PANEL_SELECTOR}[${PANEL_VISIBILITY_ATTRIBUTE}="${PANEL_EXPANDED_VALUE}"]`,
+  ].join(', ');
+  return [...inner.querySelectorAll(selector)]
+    .filter(node => (
+      (node.matches(CHAT_FRAME_SELECTOR) || (node.getAttribute('target-id') || '') !== PANEL_COMMENTS_TARGET_ID) && isDisplayed(node)
+    ))
+    .map(element => ({ element, kind: element.matches(CHAT_FRAME_SELECTOR) ? CHAT_PANEL : ENGAGEMENT_KIND }));
+}
 
-  const expandedPanels = [...inner.querySelectorAll(`${PANEL_SELECTOR}[${PANEL_VISIBILITY_ATTRIBUTE}="${PANEL_EXPANDED_VALUE}"]`)];
-  return expandedPanels.some(panel => (
-    (panel.getAttribute('target-id') || '') !== PANEL_COMMENTS_TARGET_ID && panel.getClientRects().length > 0
-  ));
+export function isYoutubePanelOpen(watch) {
+  return findYoutubePanels(watch).length > 0;
+}
+
+export function findChatFrame(chat) {
+  return chat?.querySelector('iframe') || null;
+}
+
+function frameDocument(frame) {
+  try {
+    return frame?.contentDocument || null;
+  } catch {
+    return null;
+  }
+}
+
+const chatDocument = (chat) => frameDocument(findChatFrame(chat));
+
+function textOf(node) {
+  return (node?.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+export function youtubePanelTitle(panel) {
+  if (panel.kind === CHAT_PANEL) {
+    const header = chatDocument(panel.element)?.querySelector(CHAT_HEADER_SELECTOR);
+    for (const selector of CHAT_TITLE_SELECTORS) {
+      const title = textOf(header?.querySelector(selector));
+      if (title) return title;
+    }
+    return '';
+  }
+  return textOf(panel.element.querySelector(PANEL_TITLE_SELECTOR));
+}
+
+export function closeYoutubePanel(panel) {
+  const button = panel.kind === CHAT_PANEL
+    ? chatDocument(panel.element)?.querySelector(CHAT_CLOSE_SELECTOR)
+    : panel.element.querySelector(PANEL_CLOSE_SELECTOR);
+  if (!button) return false;
+  button.click();
+  return true;
+}
+
+export function watchChatTitle(frame, onChange) {
+  let observer = null;
+  let observed = null;
+
+  const stopObserving = () => {
+    observer?.disconnect();
+    observer = null;
+    observed = null;
+  };
+
+  const attach = () => {
+    const doc = frameDocument(frame);
+    const header = doc?.querySelector(CHAT_HEADER_SELECTOR);
+    if (header && header === observed) return;
+    stopObserving();
+    observed = header || doc?.documentElement || null;
+    if (!observed) return;
+    observer = new MutationObserver(() => {
+      if (!header && doc.querySelector(CHAT_HEADER_SELECTOR)) {
+        attach();
+        onChange();
+      } else if (header) {
+        onChange();
+      }
+    });
+    observer.observe(observed, { childList: true, subtree: true, characterData: true });
+  };
+
+  const onLoad = () => {
+    attach();
+    onChange();
+  };
+  frame.addEventListener('load', onLoad);
+  attach();
+  return () => {
+    frame.removeEventListener('load', onLoad);
+    stopObserving();
+  };
+}
+
+export function watchPanelRequests(onRequest, signal) {
+  document.addEventListener('yt-action', (event) => {
+    const detail = event.detail;
+    if (detail?.actionName !== PANEL_REQUEST_ACTION) return;
+    const data = Array.isArray(detail.args) ? detail.args[0] : null;
+    const targetId = typeof data?.targetId === 'string' ? data.targetId : '';
+    const title = data?.header?.engagementPanelTitleHeaderRenderer?.title?.runs?.map(run => run.text).join('') || '';
+    onRequest({ targetId, title });
+  }, { capture: true, signal });
+}
+
+export function panelOfRequest(panels, { targetId, title }) {
+  const engagement = panels.filter(panel => panel.kind === ENGAGEMENT_KIND);
+  const byTarget = targetId && engagement.find(panel => panel.element.getAttribute('target-id') === targetId);
+  if (byTarget) return byTarget;
+  return (title && engagement.find(panel => youtubePanelTitle(panel) === title)) || null;
 }
 
 export function videoAspectRatio(player) {

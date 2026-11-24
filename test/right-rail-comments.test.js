@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { createCommentsRegion, createRelatedRegion } from '../src/features/right-rail-comments/borrowed-region.js';
 import { createCommentsLoader } from '../src/features/right-rail-comments/comments-loader.js';
 import { initialLifecycle, mountFailed, step } from '../src/features/right-rail-comments/lifecycle.js';
+import { initialPanelSelection, nextPanelSelection } from '../src/features/right-rail-comments/panel-selection.js';
 import { advance, loadPage, onCleanup, startFeature, stubProperty } from './helpers.js';
 
 const layout = { hidden: false };
@@ -478,7 +479,7 @@ test('keyboard arrows wrap and Home/End activate and focus the target tab', asyn
   }
 });
 
-test('special panels release rail clipping and closing them restores the panel', async () => {
+test('a YouTube panel keeps the right column box of the comments panel, and closing it shows the comments panel again', async () => {
   const { document } = await setup();
   const secondary = document.querySelector('#secondary');
   expect(getComputedStyle(secondary).overflowY).toBe('clip');
@@ -486,10 +487,14 @@ test('special panels release rail clipping and closing them restores the panel',
   document.querySelector('#secondary-inner').append(panel);
   await advance(200);
   expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
-  expect(getComputedStyle(secondary).overflowY).not.toBe('clip');
+  expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(true);
+  expect(getComputedStyle(secondary).overflowY).toBe('clip');
+  expect(getComputedStyle(secondary).position).toBe('sticky');
+  expect(panel.getAttribute('data-tubekit-panel')).toBe('shown');
   panel.remove();
   await advance(200);
   expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('false');
+  expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(false);
   expect(getComputedStyle(secondary).overflowY).toBe('clip');
 });
 
@@ -608,8 +613,9 @@ function parseTokens(block) {
 }
 
 function checkStyles(css) {
-  const lightRule = css.match(/#tubekit-root \{[^}]*\}/);
-  const darkRule = css.match(/html\[dark\] #tubekit-root \{[^}]*\}/);
+  const lightRule = css.match(/#tubekit-root,\s*#tubekit-youtube-tabs \{[^}]*\}/);
+  const darkRule = css.match(/html\[dark\] #tubekit-root,\s*html\[dark\] #tubekit-youtube-tabs \{[^}]*\}/);
+  const rootRule = css.match(/#tubekit-root \{[^}]*\}/);
   expect(lightRule && darkRule, 'light and dark rules exist').toBeTruthy();
   expect(darkRule[0]).toMatch(/color-scheme: dark;/);
   const light = parseTokens(lightRule[0]);
@@ -617,8 +623,8 @@ function checkStyles(css) {
   expect([...light.keys()].sort()).toStrictEqual([...dark.keys()].sort());
   expect(light).toStrictEqual(expectedTokens(LIGHT));
   expect(dark).toStrictEqual(expectedTokens(DARK));
-  expect(lightRule[0]).toMatch(/color: var\(--tubekit-text\);/);
-  expect(lightRule[0]).toMatch(/background: var\(--tubekit-bg\);/);
+  expect(rootRule[0]).toMatch(/color: var\(--tubekit-text\);/);
+  expect(rootRule[0]).toMatch(/background: var\(--tubekit-bg\);/);
   expect(css.match(/#tubekit-tabs \{[^}]*\}/)[0]).toMatch(/background: var\(--tubekit-bg\);/);
   expect(css.match(/#tubekit-toast \{[^}]*\}/)[0]).toMatch(/background: var\(--tubekit-toast-bg\);/);
   const rest = css.replace(lightRule[0], '').replace(darkRule[0], '');
@@ -2056,5 +2062,629 @@ describe('borrowed regions', () => {
     expect(below.firstElementChild).toBe(related);
     expect(related.nextElementSibling).toBe(node);
     expect(inner.querySelector('#related')).toBe(null);
+  });
+});
+
+describe('panel selection rules', () => {
+  const [a, b, c] = ['a', 'b', 'c'];
+  const state = (selected, previous, known) => ({ selected, previous, known });
+
+  test.each([
+    ['no panels reset everything', state(b, a, [a, b]), [], null, initialPanelSelection],
+    ['the first panels start on the front one', initialPanelSelection, [a, b], null, state(a, null, [a, b])],
+    ['a new panel opening is selected and the old one becomes the previous', state(a, null, [a]), [a, b], null, state(b, a, [a, b])],
+    ['nothing new keeps the selection', state(b, a, [a, b]), [a, b], null, state(b, a, [a, b])],
+    ['a request for another panel selects it', state(a, null, [a, b]), [a, b], b, state(b, a, [a, b])],
+    ['a request for the selected panel changes nothing', state(b, a, [a, b]), [a, b], b, state(b, a, [a, b])],
+    ['a request for a panel that is not open is ignored', state(a, null, [a, b]), [a, b], c, state(a, null, [a, b])],
+    ['closing the selected panel returns to the previous one', state(c, a, [a, b, c]), [a, b], null, state(a, null, [a, b])],
+    ['closing the selected panel with no previous goes to the front', state(c, null, [a, b, c]), [a, b], null, state(a, null, [a, b])],
+    ['closing the selected panel whose previous also closed goes to the front', state(c, b, [a, b, c]), [a, c].filter(x => x !== c), null, state(a, null, [a])],
+    ['closing a panel that is not selected keeps the view and the previous', state(c, a, [a, b, c]), [a, c], null, state(c, a, [a, c])],
+    ['closing the previous panel forgets it', state(c, b, [a, b, c]), [a, c], null, state(c, null, [a, c])],
+    ['one panel left keeps it selected', state(b, a, [a, b]), [b], null, state(b, null, [b])],
+    ['a panel opening in the same pass as the selected one closing is selected', state(a, null, [a]), [b], null, state(b, null, [b])],
+    ['a request beats the panels that opened in the same pass', state(a, null, [a]), [a, b, c], c, state(c, a, [a, b, c])],
+    ['a request for a panel that was already open beats panels opened meanwhile', state(b, null, [a, b]), [a, b, c], a, state(a, b, [a, b, c])],
+    ['a remembered selection resumes when nothing changed', state(b, null, [a, b]), [a, b], null, state(b, null, [a, b])],
+    ['a remembered selection yields to a panel opened meanwhile', state(b, null, [a, b]), [a, b, c], null, state(c, b, [a, b, c])],
+    ['a remembered selection closed meanwhile goes to the front', state(b, null, [a, b]), [a], null, state(a, null, [a])],
+  ])('%s', (_name, before, panels, requested, after) => {
+    expect(nextPanelSelection(before, panels, requested)).toStrictEqual(after);
+  });
+});
+
+describe('YouTube panels fill the place of the held comments panel', () => {
+  const VISIBLE = 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
+  const HIDDEN = 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN';
+
+  function addEngagement({ title = 'Info', targetId = null, close = true } = {}) {
+    const panel = document.createElement('ytd-engagement-panel-section-list-renderer');
+    if (targetId) panel.setAttribute('target-id', targetId);
+    panel.setAttribute('visibility', VISIBLE);
+    panel.innerHTML = `<ytd-engagement-panel-title-header-renderer><div id="header"><yt-formatted-string id="title-text">${title}</yt-formatted-string><div id="visibility-button"><button></button></div></div></ytd-engagement-panel-title-header-renderer>`;
+    if (close) panel.querySelector('button').addEventListener('click', () => panel.setAttribute('visibility', HIDDEN));
+    document.querySelector('#secondary-inner').append(panel);
+    return {
+      panel,
+      setTitle: (text) => { panel.querySelector('#title-text').textContent = text; },
+    };
+  }
+
+  function addChat(title = 'Top chat replay') {
+    const container = document.createElement('div');
+    container.id = 'chat-container';
+    container.innerHTML = '<ytd-live-chat-frame id="chat"><iframe></iframe></ytd-live-chat-frame>';
+    const chat = container.firstElementChild;
+    const frame = chat.querySelector('iframe');
+    const build = (text) => {
+      const doc = document.implementation.createHTMLDocument('');
+      doc.body.innerHTML = `<yt-live-chat-header-renderer><div id="label-text">${text}</div><div id="close-button"><button></button></div></yt-live-chat-header-renderer>`;
+      doc.querySelector('#close-button button').addEventListener('click', () => chat.setAttribute('collapsed', ''));
+      return doc;
+    };
+    let doc = build(title);
+    stubProperty(frame, 'contentDocument', { get: () => doc });
+    document.querySelector('#secondary-inner').prepend(container);
+    return {
+      chat,
+      frame,
+      setTitle: (text) => { doc.querySelector('#label-text').textContent = text; },
+      reload: (text) => {
+        doc = build(text);
+        frame.dispatchEvent(new Event('load'));
+      },
+      collapse: () => chat.setAttribute('collapsed', ''),
+      expand: () => chat.removeAttribute('collapsed'),
+    };
+  }
+
+  const request = (targetId, title = '') => document.dispatchEvent(new CustomEvent('yt-action', {
+    detail: {
+      actionName: 'yt-engagement-panel-visible-changed',
+      args: [{ targetId, header: { engagementPanelTitleHeaderRenderer: { title: { runs: [{ text: title }] } } } }],
+    },
+  }));
+
+  const settle = () => advance(200);
+  const row = () => document.querySelector('#tubekit-youtube-tabs');
+  const tabs = () => [...document.querySelectorAll('#tubekit-youtube-tabs .tubekit-tab')];
+  const tabNames = () => tabs().map(tab => tab.textContent);
+  const tabSelected = () => tabs().find(tab => tab.getAttribute('aria-selected') === 'true')?.textContent;
+  const marks = () => [...document.querySelectorAll('[data-tubekit-panel]')].map(node => node.getAttribute('data-tubekit-panel'));
+  const markOf = (node) => node.getAttribute('data-tubekit-panel');
+  const rootHeld = () => document.querySelector('#tubekit-root').dataset.suspended;
+  const clickTab = (name) => tabs().find(tab => tab.textContent === name).click();
+
+  test('one YouTube panel fills the place alone, with no tab row', async () => {
+    await setup();
+    const info = addEngagement({ title: 'Video info' });
+    await settle();
+    expect(rootHeld()).toBe('true');
+    expect(row()).toBe(null);
+    expect(markOf(info.panel)).toBe('shown');
+    expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(true);
+  });
+
+  test('an expanded chat counts as a YouTube panel and a collapsed one does not', async () => {
+    await setup();
+    const chat = addChat();
+    await settle();
+    expect(markOf(chat.chat)).toBe('shown');
+    chat.collapse();
+    await settle();
+    expect(rootHeld()).toBe('false');
+    expect(chat.chat.hasAttribute('data-tubekit-panel')).toBe(false);
+  });
+
+  test('two panels get a tab row at the top of the right column in the order YouTube stacks them, named by their titles', async () => {
+    await setup();
+    addEngagement({ title: 'Video info' });
+    addChat('Top chat replay');
+    await settle();
+    expect(row().parentNode).toBe(document.querySelector('#secondary-inner'));
+    expect(document.querySelector('#secondary-inner').firstElementChild).toBe(row());
+    expect(row().getAttribute('role')).toBe('tablist');
+    expect(tabNames()).toStrictEqual(['Top chat replay', 'Video info']);
+    expect(tabs().every(tab => tab.getAttribute('role') === 'tab')).toBe(true);
+    expect(tabSelected()).toBe('Top chat replay');
+    expect(marks()).toStrictEqual(['shown', 'hidden']);
+    expect(row().lastElementChild.className).toBe('tubekit-close-all');
+    expect(row().lastElementChild.textContent).toBe('Close all');
+  });
+
+  test('panels already open when the hold starts begin on the front tab', async () => {
+    const { document } = await setup({
+      beforeStart: () => {
+        addEngagement({ title: 'Video info' });
+        addChat('Chat');
+      },
+    });
+    await settle();
+    expect(rootHeld()).toBe('true');
+    expect(tabNames()).toStrictEqual(['Chat', 'Video info']);
+    expect(tabSelected()).toBe('Chat');
+    expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
+  });
+
+  test('a panel opening later is selected at once, and tab clicks switch the shown panel', async () => {
+    await setup();
+    const chat = addChat('Chat');
+    await settle();
+    const info = addEngagement({ title: 'Video info' });
+    await settle();
+    expect(tabSelected()).toBe('Video info');
+    expect(markOf(info.panel)).toBe('shown');
+    expect(markOf(chat.chat)).toBe('hidden');
+    clickTab('Chat');
+    expect(tabSelected()).toBe('Chat');
+    expect(markOf(chat.chat)).toBe('shown');
+    expect(markOf(info.panel)).toBe('hidden');
+    expect(tabs().map(tab => tab.tabIndex)).toStrictEqual([0, -1]);
+  });
+
+  test('hidden panels stay laid out so that they still count as open', async () => {
+    await setup();
+    addEngagement({ title: 'One' });
+    const second = addEngagement({ title: 'Two' });
+    await settle();
+    const style = getComputedStyle(second.panel);
+    expect(markOf(second.panel)).toBe('hidden');
+    expect(style.display).not.toBe('none');
+    expect(style.visibility).toBe('hidden');
+    expect(style.position).toBe('absolute');
+    await settle();
+    expect(rootHeld()).toBe('true');
+    expect(tabNames()).toStrictEqual(['One', 'Two']);
+  });
+
+  test('closing the viewed panel returns to the tab viewed just before, or the front tab when that is gone', async () => {
+    await setup();
+    const one = addEngagement({ title: 'One' });
+    await settle();
+    const two = addEngagement({ title: 'Two' });
+    await settle();
+    const three = addEngagement({ title: 'Three' });
+    await settle();
+    expect(tabSelected()).toBe('Three');
+    clickTab('One');
+    clickTab('Two');
+    two.panel.setAttribute('visibility', HIDDEN);
+    await settle();
+    expect(tabSelected(), 'back to the previous').toBe('One');
+    expect(markOf(one.panel)).toBe('shown');
+    one.panel.setAttribute('visibility', HIDDEN);
+    await settle();
+    expect(row(), 'one panel left, no tab row').toBe(null);
+    expect(markOf(three.panel)).toBe('shown');
+  });
+
+  test('closing a panel that is not shown only drops its tab', async () => {
+    await setup();
+    const one = addEngagement({ title: 'One' });
+    const two = addEngagement({ title: 'Two' });
+    const three = addEngagement({ title: 'Three' });
+    await settle();
+    expect(tabSelected(), 'panels already open when the hold starts begin on the front tab').toBe('One');
+    clickTab('Two');
+    one.panel.setAttribute('visibility', HIDDEN);
+    await settle();
+    expect(tabNames()).toStrictEqual(['Two', 'Three']);
+    expect(tabSelected()).toBe('Two');
+    expect(markOf(two.panel)).toBe('shown');
+    expect(three.panel.getAttribute('data-tubekit-panel')).toBe('hidden');
+    expect(one.panel.hasAttribute('data-tubekit-panel')).toBe(false);
+    three.panel.setAttribute('visibility', HIDDEN);
+    await settle();
+    expect(row()).toBe(null);
+    expect(tabSelected()).toBe(undefined);
+    expect(markOf(two.panel)).toBe('shown');
+  });
+
+  test('closing the viewed panel with no tab viewed before goes to the front tab', async () => {
+    await setup();
+    addEngagement({ title: 'One' });
+    await settle();
+    addEngagement({ title: 'Two' });
+    await settle();
+    expect(tabSelected()).toBe('Two');
+    const panels = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
+    panels[1].setAttribute('visibility', HIDDEN);
+    await settle();
+    expect(markOf(panels[0])).toBe('shown');
+    expect(row()).toBe(null);
+  });
+
+  test('a request to open a panel that is already open in another tab jumps to that tab', async () => {
+    await setup();
+    addEngagement({ title: 'Video info', targetId: 'info-target' });
+    addEngagement({ title: 'Questions', targetId: 'ask-target' });
+    addChat('Chat');
+    await settle();
+    expect(tabSelected()).toBe('Chat');
+    request('info-target', 'Video info');
+    await settle();
+    expect(tabSelected()).toBe('Video info');
+    clickTab('Chat');
+    request('unknown-target', 'Questions');
+    await settle();
+    expect(tabSelected(), 'matched by its title when no target id fits').toBe('Questions');
+    clickTab('Chat');
+    request('unknown-target', 'Unknown');
+    await settle();
+    expect(tabSelected(), 'a request no panel matches changes nothing').toBe('Chat');
+  });
+
+  test('requests for panels that are not shown by the held comments panel have no effect', async () => {
+    await setup();
+    request('whatever', 'Whatever');
+    await settle();
+    expect(rootHeld()).toBe('false');
+    const info = addEngagement({ title: 'Video info', targetId: 'info-target' });
+    await settle();
+    expect(markOf(info.panel)).toBe('shown');
+  });
+
+  test('a chat title change and a reloaded chat frame rename the tab', async () => {
+    await setup();
+    const chat = addChat('Top chat replay');
+    addEngagement({ title: 'Video info' });
+    await settle();
+    expect(tabNames()).toStrictEqual(['Top chat replay', 'Video info']);
+    chat.setTitle('Live chat replay');
+    await settle();
+    expect(tabNames()).toStrictEqual(['Live chat replay', 'Video info']);
+    chat.reload('Live chat');
+    chat.setTitle('Live chat renamed');
+    await settle();
+    expect(tabNames()).toStrictEqual(['Live chat renamed', 'Video info']);
+  });
+
+  test('an engagement panel title change renames its tab', async () => {
+    await setup();
+    const info = addEngagement({ title: 'Video info' });
+    addEngagement({ title: 'Other' });
+    await settle();
+    info.setTitle('Renamed');
+    await settle();
+    expect(tabNames()).toStrictEqual(['Renamed', 'Other']);
+  });
+
+  test('a panel without a readable title is named Chat or Panel', async () => {
+    await setup();
+    const info = addEngagement({ title: '' });
+    const chat = addChat('');
+    await settle();
+    expect(tabNames()).toStrictEqual(['Chat', 'Panel']);
+    chat.setTitle('Named');
+    info.setTitle('Titled');
+    await settle();
+    expect(tabNames()).toStrictEqual(['Named', 'Titled']);
+  });
+
+  test('tab names follow the page language', async () => {
+    await setup();
+    document.documentElement.lang = 'ko-KR';
+    addEngagement({ title: '' });
+    addChat('');
+    await settle();
+    expect(tabNames()).toStrictEqual(['채팅', '패널']);
+    expect(row().lastElementChild.textContent).toBe('모두 닫기');
+  });
+
+  test('close all closes every open panel the way its own close button does, and the comments panel comes back', async () => {
+    await setup();
+    document.querySelector('[role="tab"][data-tab="related"]').click();
+    await settle();
+    const info = addEngagement({ title: 'Video info' });
+    const chat = addChat('Chat');
+    await settle();
+    expect(row()).toBeTruthy();
+    row().querySelector('.tubekit-close-all').click();
+    await settle();
+    expect(info.panel.getAttribute('visibility')).toBe(HIDDEN);
+    expect(chat.chat.hasAttribute('collapsed')).toBe(true);
+    expect(rootHeld()).toBe('false');
+    expect(row()).toBe(null);
+    expect(marks()).toStrictEqual([]);
+    expect(selected(document)).toBe('related');
+    expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(false);
+  });
+
+  test('a single panel has no close all button', async () => {
+    await setup();
+    addEngagement({ title: 'Video info' });
+    await settle();
+    expect(document.querySelector('.tubekit-close-all')).toBe(null);
+  });
+
+  test('arrow keys, Home and End move between the tabs like the comments panel tabs and not onto close all', async () => {
+    await setup();
+    addEngagement({ title: 'One' });
+    addEngagement({ title: 'Two' });
+    addEngagement({ title: 'Three' });
+    await settle();
+    clickTab('One');
+    tabs()[0].focus();
+    const press = (key) => row().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    const expectTab = (name) => {
+      expect(tabSelected()).toBe(name);
+      expect(document.activeElement.textContent).toBe(name);
+      expect(tabs().filter(tab => tab.tabIndex === 0)).toHaveLength(1);
+    };
+    press('ArrowRight');
+    expectTab('Two');
+    press('End');
+    expectTab('Three');
+    press('ArrowRight');
+    expectTab('One');
+    press('ArrowLeft');
+    expectTab('Three');
+    press('Home');
+    expectTab('One');
+  });
+
+  test('YouTube panels keep the box of the comments panel in the two-column screen only', async () => {
+    const { watch } = await setup();
+    addEngagement({ title: 'One' });
+    addChat('Chat');
+    await settle();
+    const secondary = document.querySelector('#secondary');
+    const shown = document.querySelector('[data-tubekit-panel="shown"]');
+    expect(getComputedStyle(secondary).position).toBe('sticky');
+    expect(getComputedStyle(shown).margin).not.toBe('');
+    expect(getComputedStyle(row()).display).toBe('flex');
+    watch.setAttribute('theater', '');
+    expect(getComputedStyle(secondary).position, 'theater mode releases the box at once').not.toBe('sticky');
+    expect(getComputedStyle(row()).display).toBe('none');
+    watch.removeAttribute('theater');
+    expect(getComputedStyle(secondary).position).toBe('sticky');
+  });
+
+  test('YouTube panels do not fill the place while fullscreen holds the comments panel', async () => {
+    await setup();
+    addEngagement({ title: 'One' });
+    addEngagement({ title: 'Two' });
+    await settle();
+    expect(row()).toBeTruthy();
+    clickTab('Two');
+    const fullscreen = fullscreenStub();
+    fullscreen.enter();
+    await settle();
+    expect(rootHeld()).toBe('true');
+    expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(false);
+    expect(row()).toBe(null);
+    fullscreen.exit();
+    await settle();
+    expect(rootHeld()).toBe('true');
+    expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(true);
+    expect(tabNames()).toStrictEqual(['One', 'Two']);
+    expect(tabSelected(), 'the tab viewed before fullscreen is viewed again').toBe('Two');
+  });
+
+  test('the tab row stays in the right column while mutations happen around it, and idle DOM settles', async () => {
+    await setup();
+    addEngagement({ title: 'One' });
+    addEngagement({ title: 'Two' });
+    await settle();
+    const created = row();
+    await advance(400);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(row()).toBe(created);
+  });
+
+  describe('after the comments panel was released and stands again', () => {
+    async function twoPanels() {
+      const { watch } = await setup();
+      const first = addEngagement({ title: 'One' });
+      const second = addEngagement({ title: 'Two' });
+      await settle();
+      clickTab('One');
+      return { watch, first, second };
+    }
+
+    const leave = (watch) => watch.removeAttribute('is-two-columns_');
+    const back = async (watch) => {
+      watch.setAttribute('is-two-columns_', '');
+      await settle();
+    };
+
+    test('the same video resumes the tab that was viewed', async () => {
+      const { watch } = await twoPanels();
+      leave(watch);
+      await settle();
+      expect(document.querySelector('#tubekit-root')).toBe(null);
+      expect(document.querySelector('#tubekit-youtube-tabs')).toBe(null);
+      expect(marks()).toStrictEqual([]);
+      expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(false);
+      await back(watch);
+      expect(tabNames()).toStrictEqual(['One', 'Two']);
+      expect(tabSelected()).toBe('One');
+    });
+
+    test('a panel opened in the meantime is the tab shown', async () => {
+      const { watch } = await twoPanels();
+      leave(watch);
+      await settle();
+      addEngagement({ title: 'Three' });
+      await back(watch);
+      expect(tabSelected()).toBe('Three');
+    });
+
+    test('the viewed panel closed in the meantime leaves the front tab', async () => {
+      const { watch, first } = await twoPanels();
+      clickTab('Two');
+      leave(watch);
+      await settle();
+      addEngagement({ title: 'Three' });
+      document.querySelectorAll('ytd-engagement-panel-section-list-renderer')[1].setAttribute('visibility', HIDDEN);
+      await back(watch);
+      expect(tabNames()).toStrictEqual(['One', 'Three']);
+      expect(tabSelected()).toBe('Three');
+      expect(first.panel.getAttribute('data-tubekit-panel')).toBe('hidden');
+    });
+
+    test('closing the viewed panel in the meantime goes to the front tab', async () => {
+      const { watch, first, second } = await twoPanels();
+      leave(watch);
+      await settle();
+      first.panel.setAttribute('visibility', HIDDEN);
+      second.panel.setAttribute('visibility', VISIBLE);
+      addEngagement({ title: 'Three' }).panel.setAttribute('visibility', HIDDEN);
+      await back(watch);
+      expect(row()).toBe(null);
+      expect(markOf(second.panel)).toBe('shown');
+    });
+
+    test('the viewed panel closed in the meantime leaves the front tab, not the one viewed before it', async () => {
+      const { watch } = await setup();
+      addEngagement({ title: 'One' });
+      await settle();
+      addEngagement({ title: 'Two' });
+      await settle();
+      const three = addEngagement({ title: 'Three' });
+      await settle();
+      clickTab('Two');
+      clickTab('Three');
+      leave(watch);
+      await settle();
+      three.panel.setAttribute('visibility', HIDDEN);
+      await back(watch);
+      expect(tabNames()).toStrictEqual(['One', 'Two']);
+      expect(tabSelected()).toBe('One');
+    });
+
+    test('a different video starts on the front tab', async () => {
+      const { watch } = await twoPanels();
+      leave(watch);
+      await settle();
+      history.replaceState(null, '', '/watch?v=B');
+      watch.setAttribute('video-id', 'B');
+      await back(watch);
+      expect(tabSelected()).toBe('One');
+      clickTab('Two');
+      leave(watch);
+      await settle();
+      history.replaceState(null, '', '/watch?v=A');
+      watch.setAttribute('video-id', 'A');
+      await back(watch);
+      expect(tabSelected(), 'seeing another video in between forgets the tab').toBe('One');
+    });
+  });
+
+  test('syncing again leaves the tab buttons where they are, so keyboard focus stays', async () => {
+    await setup();
+    addEngagement({ title: 'One' });
+    addEngagement({ title: 'Two' });
+    addEngagement({ title: 'Three' });
+    await settle();
+    const buttons = tabs();
+    buttons[1].focus();
+    const moved = vi.fn();
+    const watcher = new MutationObserver(moved);
+    watcher.observe(row(), { childList: true });
+    document.querySelector('#secondary-inner').append(document.createElement('div'));
+    await settle();
+    window.dispatchEvent(new Event('resize'));
+    await settle();
+    expect(document.activeElement).toBe(buttons[1]);
+    expect(tabs()).toStrictEqual(buttons);
+    expect(moved).not.toHaveBeenCalled();
+    watcher.disconnect();
+  });
+
+  test('a chat whose frame is added after the chat itself is still watched for its title', async () => {
+    await setup();
+    const container = document.createElement('div');
+    container.id = 'chat-container';
+    container.innerHTML = '<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>';
+    document.querySelector('#secondary-inner').prepend(container);
+    addEngagement({ title: 'Video info' });
+    await settle();
+    expect(tabNames()).toStrictEqual(['Chat', 'Video info']);
+    const frame = document.createElement('iframe');
+    const doc = document.implementation.createHTMLDocument('');
+    doc.body.innerHTML = '<yt-live-chat-header-renderer><div id="label-text">Top chat replay</div></yt-live-chat-header-renderer>';
+    stubProperty(frame, 'contentDocument', { get: () => doc });
+    container.firstElementChild.append(frame);
+    await settle();
+    expect(tabNames()).toStrictEqual(['Top chat replay', 'Video info']);
+    doc.querySelector('#label-text').textContent = 'Live chat replay';
+    await settle();
+    expect(tabNames()).toStrictEqual(['Live chat replay', 'Video info']);
+  });
+
+  test('a panel hidden and re-requested while viewing another stays out of the way of the next video', async () => {
+    const { watch } = await setup();
+    addEngagement({ title: 'One', targetId: 'one' });
+    addEngagement({ title: 'Two', targetId: 'two' });
+    await settle();
+    watch.removeAttribute('is-two-columns_');
+    await settle();
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    request('two', 'Two');
+    await advance(100);
+    history.replaceState(null, '', '/watch?v=B');
+    watch.setAttribute('video-id', 'B');
+    watch.setAttribute('is-two-columns_', '');
+    await settle();
+    expect(tabSelected(), 'the stale request of the old video is dropped').toBe('One');
+  });
+
+  test('requests made while the comments panel is released decide the tab when it stands again, the latest action first', async () => {
+    const { watch } = await setup();
+    addEngagement({ title: 'One', targetId: 'one' });
+    addEngagement({ title: 'Two', targetId: 'two' });
+    await settle();
+    watch.removeAttribute('is-two-columns_');
+    await settle();
+    addEngagement({ title: 'Three', targetId: 'three' });
+    const four = addEngagement({ title: 'Four', targetId: 'four' });
+    request('three', 'Three');
+    request('four', 'Four');
+    expect(four.panel).toBeTruthy();
+    watch.setAttribute('is-two-columns_', '');
+    await settle();
+    expect(tabSelected()).toBe('Four');
+    clickTab('One');
+    watch.removeAttribute('is-two-columns_');
+    await settle();
+    request('two', 'Two');
+    watch.setAttribute('is-two-columns_', '');
+    await settle();
+    expect(tabSelected(), 'an already open panel pressed again counts as the latest action').toBe('Two');
+  });
+
+  test('the tab viewed before leaving is forgotten when the watch page goes away and the same video comes back at once', async () => {
+    const { watch } = await setup();
+    addEngagement({ title: 'One' });
+    addEngagement({ title: 'Two' });
+    await settle();
+    clickTab('Two');
+    history.replaceState(null, '', '/');
+    watch.setAttribute('hidden', '');
+    window.dispatchEvent(new Event('popstate'));
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    history.replaceState(null, '', '/watch?v=A');
+    watch.removeAttribute('hidden');
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+    expect(tabSelected()).toBe('One');
+  });
+
+  test('stopping the feature removes what it put on the page', async () => {
+    const { stop } = await setup();
+    addEngagement({ title: 'One' });
+    addEngagement({ title: 'Two' });
+    const chat = addChat('Chat');
+    await settle();
+    stop();
+    chat.setTitle('Late');
+    await advance(300);
+    expect(tabNames()).not.toContain('Late');
+    document.dispatchEvent(new CustomEvent('yt-action', { detail: { actionName: 'yt-engagement-panel-visible-changed', args: [{ targetId: 'x' }] } }));
+    await advance(300);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
