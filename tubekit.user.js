@@ -32,6 +32,10 @@
 	var NOT_AD_SELECTOR = AD_CLASSES.map((name) => `:not(.${name})`).join("");
 	var AD_PLAYER_SELECTORS = AD_CLASSES.map((name) => `${PLAYER_SELECTOR}.${name}`);
 	var PLAYER_AREA_SELECTOR = `${PLAYER_SELECTOR}, ytd-player`;
+	var PRIMARY_SELECTOR = "#primary";
+	var SECONDARY_INNER_SELECTOR = "#secondary-inner";
+	var COMMENTS_SELECTOR = "ytd-comments#comments";
+	var COMMENTS_LOADED_SELECTOR = "ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count";
 	function isDesktopSite() {
 		return location.hostname === "www.youtube.com";
 	}
@@ -172,6 +176,27 @@
 	function requestLayout() {
 		window.dispatchEvent(new Event("resize"));
 	}
+	var COMMENTS_OFF_BY_UPLOADER = "uploader";
+	var COMMENTS_OFF_LIVE_LOOK = "live-look";
+	function findNativeComments(watch, ignoreInside = null) {
+		if (!watch) return null;
+		return [...watch.querySelectorAll(COMMENTS_SELECTOR)].find((node) => !(ignoreInside && node.closest(ignoreInside)) && node.closest(PRIMARY_SELECTOR)) || null;
+	}
+	function findNativeRelated(watch) {
+		const secondaryInner = watch?.querySelector(SECONDARY_INNER_SELECTOR);
+		if (!secondaryInner) return null;
+		return [...secondaryInner.children].find((child) => child.id === "related" || child.matches("ytd-watch-next-secondary-results-renderer#related")) || null;
+	}
+	function commentsHaveLoaded(node) {
+		if (!node) return false;
+		return Boolean(node.querySelector(COMMENTS_LOADED_SELECTOR));
+	}
+	function commentsOffCandidate(node, watch) {
+		if (!node) return null;
+		if (node.querySelector("ytd-message-renderer, #message") && !node.querySelector("ytd-comments-header-renderer, ytd-comment-thread-renderer")) return COMMENTS_OFF_BY_UPLOADER;
+		if (node.hasAttribute("hidden") && !node.firstElementChild && watch?.querySelector(`${SECONDARY_INNER_SELECTOR} ytd-live-chat-frame`)) return COMMENTS_OFF_LIVE_LOOK;
+		return null;
+	}
 	var QUALITY_HEIGHT = {
 		highres: 4320,
 		hd2160: 2160,
@@ -233,9 +258,231 @@
 		primary: "#primary",
 		secondary: "#secondary",
 		secondaryInner: "#secondary-inner",
-		related: "ytd-watch-next-secondary-results-renderer#related, #related",
-		comments: "ytd-comments#comments"
+		related: "ytd-watch-next-secondary-results-renderer#related, #related"
 	};
+	function createBorrowedRegion({ pane, root, find, markerName, fallbackHome, yieldsToYouTubeMoves = false }) {
+		let node = null;
+		let marker = null;
+		let home = null;
+		const isOutsidePanel = (target) => Boolean(target?.isConnected) && !root.contains(target);
+		function forgetMemory() {
+			node = null;
+			marker = null;
+			home = null;
+		}
+		return {
+			pane,
+			get node() {
+				return node;
+			},
+			contains(target) {
+				return Boolean(node && target && node.contains(target));
+			},
+			take(watch, beforeMove) {
+				const found = find(watch);
+				if (!found) return null;
+				if (node && node !== found && node.parentNode === pane) node.remove();
+				if (!marker) {
+					home = found.parentNode;
+					marker = document.createComment(`${SCRIPT_ID}:${markerName}`);
+					found.parentNode.insertBefore(marker, found);
+				}
+				beforeMove?.(found);
+				pane.appendChild(found);
+				node = found;
+				return found;
+			},
+			replaced(watch) {
+				const replacement = find(watch);
+				return Boolean(replacement) || Boolean(node && node.parentNode !== pane);
+			},
+			forget() {
+				if (node?.parentNode === pane) node.remove();
+				marker?.remove();
+				forgetMemory();
+			},
+			restore(watch, { videoId, before = null }) {
+				const held = node;
+				const homeMarker = marker;
+				const homeParent = home;
+				forgetMemory();
+				if (!held || !watch?.isConnected || watch.getAttribute("video-id") !== videoId) {
+					homeMarker?.remove();
+					return;
+				}
+				if (find(watch)) {
+					homeMarker?.remove();
+					return;
+				}
+				if (held.parentNode !== pane) {
+					if (yieldsToYouTubeMoves && isOutsidePanel(held) && watch.contains(held)) {
+						homeMarker?.remove();
+						return;
+					}
+					if (isOutsidePanel(before) && watch.contains(before)) {
+						before.before(held);
+						homeMarker?.remove();
+						return;
+					}
+				}
+				if (homeMarker?.isConnected && watch.contains(homeMarker)) {
+					homeMarker.replaceWith(held);
+					return;
+				}
+				fallbackHome(watch, homeParent)?.appendChild(held);
+				homeMarker?.remove();
+			}
+		};
+	}
+	function createCommentsRegion(pane, root) {
+		return createBorrowedRegion({
+			pane,
+			root,
+			find: (watch) => findNativeComments(watch, `#${SCRIPT_ID}-root`),
+			markerName: "comments-home",
+			fallbackHome: (watch, home) => home?.isConnected && watch.contains(home) ? home : watch.querySelector("#primary #below") || watch.querySelector(SELECTORS.primary)
+		});
+	}
+	function createRelatedRegion(pane, root) {
+		return createBorrowedRegion({
+			pane,
+			root,
+			find: findNativeRelated,
+			markerName: "related-home",
+			fallbackHome: (watch) => watch.querySelector(SELECTORS.secondaryInner),
+			yieldsToYouTubeMoves: true
+		});
+	}
+	var LOADING = "loading";
+	var LOADED = "loaded";
+	var FAILED = "failed";
+	function createCommentsLoader({ region, watch, videoId, onChange }) {
+		let state = LOADING;
+		let disposed = false;
+		let observer = null;
+		let findTimer = 0;
+		let checkTimer = 0;
+		let uploaderOff = false;
+		const frames = new Set();
+		const isDecided = () => state === "loaded" || state === "off";
+		function emit(next) {
+			state = next;
+			onChange(next);
+		}
+		function settle(next) {
+			window.clearTimeout(findTimer);
+			if (state !== next) emit(next);
+		}
+		function nextFrame(callback) {
+			const frame = requestAnimationFrame(() => {
+				frames.delete(frame);
+				if (!disposed) callback();
+			});
+			frames.add(frame);
+		}
+		function check() {
+			const node = region.node;
+			if (disposed || !node || videoId !== urlVideoId()) return;
+			if (commentsOffCandidate(node, watch) === "uploader") {
+				if (!uploaderOff) {
+					uploaderOff = true;
+					window.clearTimeout(findTimer);
+					emit("off");
+				} else settle("off");
+				return;
+			}
+			uploaderOff = false;
+			if (commentsHaveLoaded(node) || state === "off") settle(LOADED);
+		}
+		function observe() {
+			observer?.disconnect();
+			window.clearTimeout(checkTimer);
+			checkTimer = 0;
+			uploaderOff = false;
+			const node = region.node;
+			if (!node) return;
+			observer = new MutationObserver(() => {
+				if (checkTimer) return;
+				checkTimer = window.setTimeout(() => {
+					checkTimer = 0;
+					check();
+				}, 250);
+			});
+			observer.observe(node, {
+				childList: true,
+				subtree: true
+			});
+			check();
+		}
+		function adopt() {
+			if (disposed || !region.pane.isConnected) return true;
+			if (region.node) return isDecided();
+			if (!region.take(watch)) return false;
+			observe();
+			nextFrame(() => {
+				region.pane.dispatchEvent(new Event("scroll"));
+				window.dispatchEvent(new Event("scroll"));
+			});
+			return isDecided();
+		}
+		function wait(startedAt = performance.now()) {
+			window.clearTimeout(findTimer);
+			if (adopt() || isDecided()) return;
+			if (disposed || !region.pane.isConnected) return;
+			const elapsed = performance.now() - startedAt;
+			if (elapsed >= 3e3 && commentsOffCandidate(region.node, watch) === "live-look") {
+				settle("off");
+				return;
+			}
+			if (elapsed >= 2e4) {
+				emit(FAILED);
+				return;
+			}
+			findTimer = window.setTimeout(() => wait(startedAt), 250);
+		}
+		return {
+			get state() {
+				return state;
+			},
+			start() {
+				wait();
+			},
+			retry() {
+				if (disposed || state !== "failed") return;
+				emit(LOADING);
+				if (region.node) {
+					const pane = region.pane;
+					pane.scrollTop = Math.max(0, pane.scrollHeight - pane.clientHeight - 1);
+					pane.dispatchEvent(new Event("scroll"));
+					nextFrame(() => {
+						pane.scrollTop = 0;
+					});
+				}
+				window.dispatchEvent(new Event("scroll"));
+				wait();
+			},
+			refresh() {
+				if (disposed || !region.replaced(watch)) return;
+				observer?.disconnect();
+				window.clearTimeout(checkTimer);
+				checkTimer = 0;
+				window.clearTimeout(findTimer);
+				region.forget();
+				emit(LOADING);
+				wait();
+			},
+			dispose() {
+				disposed = true;
+				observer?.disconnect();
+				observer = null;
+				window.clearTimeout(findTimer);
+				window.clearTimeout(checkTimer);
+				checkTimer = 0;
+				frames.forEach((frame) => cancelAnimationFrame(frame));
+				frames.clear();
+			}
+		};
+	}
 	var ACTIVE_CLASS = `${SCRIPT_ID}-active`;
 	var HELD_CLASS = `${SCRIPT_ID}-suspended`;
 	var SHOWN_SCOPE = `html.${ACTIVE_CLASS}:not(.${HELD_CLASS})`;
@@ -543,28 +790,21 @@
 		root: null,
 		commentsPane: null,
 		relatedPane: null,
-		commentsNode: null,
-		relatedNode: null,
-		commentsMarker: null,
-		relatedMarker: null,
-		commentsHome: null,
+		commentsRegion: null,
+		relatedRegion: null,
+		commentsLoader: null,
 		unavailableTimer: 0,
-		commentsReady: false,
 		activeTab: "comments",
 		scrollTop: {
 			comments: 0,
 			related: 0
 		},
 		lifecycle: initialLifecycle,
-		mountTimeout: 0,
-		commentsTimeout: 0,
-		commentsCheckTimer: 0,
 		evaluationTimer: 0,
 		lastPaneScrollAt: 0,
 		statusShown: false,
 		retryTimer: 0,
 		specialObserver: null,
-		commentsObserver: null,
 		appObserver: null,
 		observerTarget: null
 	};
@@ -638,9 +878,6 @@
 				} : null
 			}
 		};
-	}
-	function marker(name) {
-		return document.createComment(`${SCRIPT_ID}:${name}`);
 	}
 	function statusElement(kind) {
 		const text = labels();
@@ -750,9 +987,11 @@
 		if (isPaneShown(pane)) state.scrollTop[state.activeTab] = pane.scrollTop;
 	}
 	function recordPaneScroll(event) {
-		state.lastPaneScrollAt = performance.now();
 		const pane = event.currentTarget;
-		if (isPaneShown(pane)) state.scrollTop[pane.dataset.tab] = pane.scrollTop;
+		const tab = pane.dataset.tab;
+		if (!isPaneShown(pane) || pane.scrollTop === state.scrollTop[tab]) return;
+		state.lastPaneScrollAt = performance.now();
+		state.scrollTop[tab] = pane.scrollTop;
 	}
 	function syncScrollbarInsets() {
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
@@ -798,139 +1037,24 @@
 			toast.dataset.visible = "false";
 		}, 4500);
 	}
-	function commentsUnavailable(node) {
-		if (!node?.querySelector("ytd-message-renderer, #message")) return false;
-		return !node.querySelector("ytd-comments-header-renderer, ytd-comment-thread-renderer");
-	}
-	function showCommentsUnavailable(generation, node) {
-		state.commentsReady = true;
-		clearTimeout(state.commentsTimeout);
+	function showCommentsUnavailable() {
 		setCommentsStatus(null);
 		showToast(labels().unavailable);
-		clearTimeout(state.unavailableTimer);
 		state.unavailableTimer = window.setTimeout(() => {
-			if (generation === state.generation && node === state.commentsNode && state.videoId === urlVideoId()) switchTab("related");
+			if (state.commentsLoader?.state === "off" && state.videoId === urlVideoId()) switchTab("related");
 		}, 900);
 	}
-	function liveCommentsOff() {
-		const node = state.commentsNode;
-		if (!node?.hasAttribute("hidden") || node.firstElementChild) return false;
-		return Boolean(state.watch?.querySelector(`${SELECTORS.secondaryInner} ytd-live-chat-frame`));
-	}
-	function observeComments() {
-		state.commentsObserver?.disconnect();
-		if (!state.commentsNode) return;
-		const generation = state.generation;
-		const node = state.commentsNode;
-		let unavailable = false;
-		const check = () => {
-			if (generation !== state.generation || node !== state.commentsNode || state.videoId !== urlVideoId()) return;
-			if (commentsUnavailable(state.commentsNode)) {
-				if (!unavailable) {
-					unavailable = true;
-					showCommentsUnavailable(generation, node);
-				} else {
-					state.commentsReady = true;
-					clearTimeout(state.commentsTimeout);
-					setCommentsStatus(null);
-				}
-				return;
-			}
-			unavailable = false;
-			clearTimeout(state.unavailableTimer);
-			if (commentsHaveLoaded(state.commentsNode)) {
-				state.commentsReady = true;
-				clearTimeout(state.commentsTimeout);
-				setCommentsStatus(null);
-			}
-		};
-		clearTimeout(state.commentsCheckTimer);
-		state.commentsCheckTimer = 0;
-		state.commentsObserver = new MutationObserver(() => {
-			if (state.commentsCheckTimer) return;
-			state.commentsCheckTimer = window.setTimeout(() => {
-				state.commentsCheckTimer = 0;
-				check();
-			}, 250);
-		});
-		state.commentsObserver.observe(state.commentsNode, {
-			childList: true,
-			subtree: true
-		});
-		check();
-	}
-	function commentsHaveLoaded(node) {
-		if (!node) return false;
-		return Boolean(node.querySelector("ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count"));
-	}
-	function findNativeComments(watch) {
-		if (!watch) return null;
-		return [...watch.querySelectorAll(SELECTORS.comments)].find((node) => !node.closest(`#tubekit-root`) && node.closest(SELECTORS.primary)) || null;
-	}
-	function attachComments(generation) {
-		if (generation !== state.generation || !state.root?.isConnected) return true;
-		if (state.commentsNode) return state.commentsReady;
-		const comments = findNativeComments(state.watch);
-		if (!comments) return false;
-		state.commentsHome = comments.parentNode;
-		state.commentsMarker = marker("comments-home");
-		comments.parentNode.insertBefore(state.commentsMarker, comments);
-		state.commentsPane.appendChild(comments);
-		state.commentsNode = comments;
-		observeComments();
-		requestAnimationFrame(() => {
-			if (generation !== state.generation) return;
-			state.commentsPane?.dispatchEvent(new Event("scroll"));
-			window.dispatchEvent(new Event("scroll"));
-		});
-		return state.commentsReady;
-	}
-	function syncReplacedComments() {
-		const replacement = findNativeComments(state.watch);
-		const current = state.commentsNode;
-		if (!replacement && (!current || current.parentNode === state.commentsPane)) return;
-		state.commentsObserver?.disconnect();
-		clearTimeout(state.commentsCheckTimer);
-		state.commentsCheckTimer = 0;
-		clearTimeout(state.commentsTimeout);
+	function reactToComments(commentsState) {
 		clearTimeout(state.unavailableTimer);
-		if (replacement !== current && current?.parentNode === state.commentsPane) current.remove();
-		state.commentsMarker?.remove();
-		state.commentsMarker = null;
-		state.commentsHome = null;
-		state.commentsNode = null;
-		state.commentsReady = false;
-		setCommentsStatus("loading");
-		waitForComments(state.generation);
-	}
-	function waitForComments(generation, startedAt = performance.now()) {
-		clearTimeout(state.commentsTimeout);
-		if (attachComments(generation) || state.commentsReady) return;
-		if (generation !== state.generation || !state.root?.isConnected) return;
-		if (performance.now() - startedAt >= 3e3 && liveCommentsOff()) {
-			showCommentsUnavailable(generation, state.commentsNode);
-			return;
-		}
-		if (performance.now() - startedAt >= 2e4) {
-			setCommentsStatus("error");
-			return;
-		}
-		state.commentsTimeout = window.setTimeout(() => waitForComments(generation, startedAt), 300);
+		if (commentsState === "loading") setCommentsStatus("loading");
+		else if (commentsState === "failed") setCommentsStatus("error");
+		else if (commentsState === "loaded") setCommentsStatus(null);
+		else if (commentsState === "off") showCommentsUnavailable();
 	}
 	function retryComments() {
 		if (!state.root) return;
-		setCommentsStatus("loading");
 		switchTab("comments");
-		if (state.commentsNode) {
-			state.commentsPane.scrollTop = Math.max(0, state.commentsPane.scrollHeight - state.commentsPane.clientHeight - 1);
-			state.commentsPane.dispatchEvent(new Event("scroll"));
-			const generation = state.generation;
-			requestAnimationFrame(() => {
-				if (generation === state.generation && state.commentsPane) state.commentsPane.scrollTop = 0;
-			});
-		}
-		window.dispatchEvent(new Event("scroll"));
-		waitForComments(state.generation);
+		state.commentsLoader.retry();
 	}
 	function observeSpecialPanels() {
 		state.specialObserver?.disconnect();
@@ -957,19 +1081,12 @@
 			subtree: true
 		});
 	}
-	function findNativeRelated(watch) {
-		const secondaryInner = watch?.querySelector(SELECTORS.secondaryInner);
-		if (!secondaryInner) return null;
-		return [...secondaryInner.children].find((child) => child.id === "related" || child.matches("ytd-watch-next-secondary-results-renderer#related")) || null;
-	}
 	function syncReplacedRelated() {
 		if (!state.root?.isConnected || !state.relatedPane) return;
-		const replacement = findNativeRelated(state.watch);
-		if (!replacement) return;
+		const region = state.relatedRegion;
+		if (!region.replaced(state.watch)) return;
 		const savedScrollTop = state.activeTab === "related" && isPaneShown(state.relatedPane) ? state.relatedPane.scrollTop : state.scrollTop.related;
-		if (state.relatedNode !== replacement && state.relatedNode?.parentElement === state.relatedPane) state.relatedNode.remove();
-		state.relatedPane.appendChild(replacement);
-		state.relatedNode = replacement;
+		if (!region.take(state.watch)) return;
 		state.scrollTop.related = savedScrollTop;
 		const generation = state.generation;
 		requestAnimationFrame(() => {
@@ -981,11 +1098,8 @@
 		state.root.dataset.suspended = String(held);
 	}
 	function mount(watch, initialTab) {
-		const secondaryInner = watch?.querySelector(SELECTORS.secondaryInner);
-		const related = findNativeRelated(watch);
-		if (!secondaryInner || !related) return false;
+		if (!watch?.querySelector(SELECTORS.secondaryInner) || !findNativeRelated(watch)) return false;
 		state.generation += 1;
-		const generation = state.generation;
 		state.watch = watch;
 		state.videoId = urlVideoId();
 		state.activeTab = initialTab;
@@ -993,74 +1107,46 @@
 			comments: 0,
 			related: 0
 		};
-		state.commentsReady = false;
 		const root = buildRoot();
-		state.relatedMarker = marker("related-home");
-		related.parentNode.insertBefore(state.relatedMarker, related);
-		related.parentNode.insertBefore(root, related);
-		state.relatedPane.appendChild(related);
-		state.relatedNode = related;
+		state.relatedRegion = createRelatedRegion(state.relatedPane, root);
+		state.commentsRegion = createCommentsRegion(state.commentsPane, root);
+		state.commentsLoader = createCommentsLoader({
+			region: state.commentsRegion,
+			watch,
+			videoId: state.videoId,
+			onChange: reactToComments
+		});
+		state.relatedRegion.take(watch, (related) => related.before(root));
 		document.documentElement.classList.add(ACTIVE_CLASS);
 		applyHeld(false);
 		switchTab(initialTab, { reset: true });
 		observeSpecialPanels();
-		waitForComments(generation);
+		state.commentsLoader.start();
 		return true;
 	}
-	function restoreNode(node, homeMarker, kind, beforeNode = null) {
-		const watch = state.watch;
-		if (!node || !watch?.isConnected || watch.getAttribute("video-id") !== state.videoId) {
-			homeMarker?.remove();
-			return;
-		}
-		if (kind === "comments" ? findNativeComments(watch) : findNativeRelated(watch)) {
-			homeMarker?.remove();
-			return;
-		}
-		if (kind === "related" && node.parentNode !== state.relatedPane) {
-			if (node.isConnected && watch.contains(node) && !state.root?.contains(node)) {
-				homeMarker?.remove();
-				return;
-			}
-			if (beforeNode?.isConnected && watch.contains(beforeNode) && !state.root?.contains(beforeNode)) {
-				beforeNode.before(node);
-				homeMarker?.remove();
-				return;
-			}
-		}
-		if (homeMarker?.isConnected && watch.contains(homeMarker)) {
-			homeMarker.replaceWith(node);
-			return;
-		}
-		(kind === "comments" ? state.commentsHome?.isConnected && watch.contains(state.commentsHome) ? state.commentsHome : watch.querySelector("#primary #below") || watch.querySelector(SELECTORS.primary) : watch.querySelector(SELECTORS.secondaryInner))?.appendChild(node);
-		homeMarker?.remove();
-	}
 	function teardown() {
-		clearTimeout(state.mountTimeout);
 		clearTimeout(state.unavailableTimer);
-		clearTimeout(state.commentsTimeout);
-		clearTimeout(state.commentsCheckTimer);
-		state.commentsCheckTimer = 0;
 		clearTimeout(state.retryTimer);
 		state.specialObserver?.disconnect();
-		state.commentsObserver?.disconnect();
 		state.specialObserver = null;
-		state.commentsObserver = null;
-		const relatedBeforeComments = state.relatedNode && state.relatedNode.nextElementSibling === state.commentsNode ? state.commentsNode : null;
-		restoreNode(state.commentsNode, state.commentsMarker, "comments");
-		restoreNode(state.relatedNode, state.relatedMarker, "related", relatedBeforeComments);
+		state.commentsLoader?.dispose();
+		const comments = state.commentsRegion;
+		const related = state.relatedRegion;
+		const relatedBeforeComments = related?.node && related.node.nextElementSibling === comments?.node ? comments.node : null;
+		comments?.restore(state.watch, { videoId: state.videoId });
+		related?.restore(state.watch, {
+			videoId: state.videoId,
+			before: relatedBeforeComments
+		});
 		state.root?.remove();
 		document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS);
 		state.generation += 1;
 		state.root = null;
 		state.commentsPane = null;
 		state.relatedPane = null;
-		state.commentsNode = null;
-		state.relatedNode = null;
-		state.commentsMarker = null;
-		state.commentsHome = null;
-		state.relatedMarker = null;
-		state.commentsReady = false;
+		state.commentsRegion = null;
+		state.relatedRegion = null;
+		state.commentsLoader = null;
 		state.videoId = null;
 		state.watch = null;
 	}
@@ -1089,13 +1175,13 @@
 		refreshLabels();
 		advanceLifecycle();
 		if (state.root) {
-			syncReplacedComments();
+			state.commentsLoader.refresh();
 			syncReplacedRelated();
 			syncScrollbarInsets();
 		}
 	}
 	function isInsideAdoptedContent(node) {
-		return Boolean(state.commentsNode?.contains(node) || state.relatedNode?.contains(node));
+		return Boolean(state.commentsRegion?.contains(node) || state.relatedRegion?.contains(node));
 	}
 	var isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
 	var isIdleOffWatch = () => !state.root && !isVideoPage();
@@ -1187,7 +1273,7 @@
 		return () => {
 			controller.abort();
 			state.appObserver?.disconnect();
-			state.commentsObserver?.disconnect();
+			state.commentsLoader?.dispose();
 			state.specialObserver?.disconnect();
 		};
 	}

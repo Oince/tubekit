@@ -11,6 +11,10 @@ export const PLAYER_SELECTOR = `#${PLAYER_ID}`;
 export const NOT_AD_SELECTOR = AD_CLASSES.map(name => `:not(.${name})`).join('');
 export const AD_PLAYER_SELECTORS = AD_CLASSES.map(name => `${PLAYER_SELECTOR}.${name}`);
 const PLAYER_AREA_SELECTOR = `${PLAYER_SELECTOR}, ytd-player`;
+const PRIMARY_SELECTOR = '#primary';
+const SECONDARY_INNER_SELECTOR = '#secondary-inner';
+const COMMENTS_SELECTOR = 'ytd-comments#comments';
+const COMMENTS_LOADED_SELECTOR = 'ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count';
 
 export function isDesktopSite() {
   return location.hostname === 'www.youtube.com';
@@ -177,4 +181,37 @@ export function setPlaybackQuality(player, quality, ...format) {
 
 export function requestLayout() {
   window.dispatchEvent(new Event('resize'));
+}
+
+export const COMMENTS_OFF_BY_UPLOADER = 'uploader';
+export const COMMENTS_OFF_LIVE_LOOK = 'live-look';
+
+export function findNativeComments(watch, ignoreInside = null) {
+  if (!watch) return null;
+  const candidates = [...watch.querySelectorAll(COMMENTS_SELECTOR)];
+  return candidates.find(node => !(ignoreInside && node.closest(ignoreInside)) && node.closest(PRIMARY_SELECTOR)) || null;
+}
+
+export function findNativeRelated(watch) {
+  const secondaryInner = watch?.querySelector(SECONDARY_INNER_SELECTOR);
+  if (!secondaryInner) return null;
+  return [...secondaryInner.children].find(child => (
+    child.id === 'related' || child.matches('ytd-watch-next-secondary-results-renderer#related')
+  )) || null;
+}
+
+export function commentsHaveLoaded(node) {
+  if (!node) return false;
+  return Boolean(node.querySelector(COMMENTS_LOADED_SELECTOR));
+}
+
+export function commentsOffCandidate(node, watch) {
+  if (!node) return null;
+  if (node.querySelector('ytd-message-renderer, #message') && !node.querySelector('ytd-comments-header-renderer, ytd-comment-thread-renderer')) {
+    return COMMENTS_OFF_BY_UPLOADER;
+  }
+  if (node.hasAttribute('hidden') && !node.firstElementChild && watch?.querySelector(`${SECONDARY_INNER_SELECTOR} ytd-live-chat-frame`)) {
+    return COMMENTS_OFF_LIVE_LOOK;
+  }
+  return null;
 }

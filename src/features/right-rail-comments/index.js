@@ -1,7 +1,9 @@
-import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, LIVE_COMMENTS_GRACE_MS, SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
+import { createCommentsRegion, createRelatedRegion } from './borrowed-region.js';
+import { FAILED, LOADED, LOADING, OFF, createCommentsLoader } from './comments-loader.js';
+import { SCRIPT_ID, SCROLLBAR_AREA_WIDTH, SCROLL_IDLE_MS, SELECTORS } from './constants.js';
 import { ACTIVE_CLASS, HELD, HELD_CLASS, initialLifecycle, mountFailed, step } from './lifecycle.js';
 import { addStyles } from './styles.js';
-import { findWatch, isDesktopSite, isPlayerArea, isVideoPage, pageFollowsUrl, urlVideoId } from '../../core/youtube.js';
+import { findNativeRelated, findWatch, isDesktopSite, isPlayerArea, isVideoPage, pageFollowsUrl, urlVideoId } from '../../core/youtube.js';
 
 const state = {
   generation: 0,
@@ -10,25 +12,18 @@ const state = {
   root: null,
   commentsPane: null,
   relatedPane: null,
-  commentsNode: null,
-  relatedNode: null,
-  commentsMarker: null,
-  relatedMarker: null,
-  commentsHome: null,
+  commentsRegion: null,
+  relatedRegion: null,
+  commentsLoader: null,
   unavailableTimer: 0,
-  commentsReady: false,
   activeTab: 'comments',
   scrollTop: { comments: 0, related: 0 },
   lifecycle: initialLifecycle,
-  mountTimeout: 0,
-  commentsTimeout: 0,
-  commentsCheckTimer: 0,
   evaluationTimer: 0,
   lastPaneScrollAt: 0,
   statusShown: false,
   retryTimer: 0,
   specialObserver: null,
-  commentsObserver: null,
   appObserver: null,
   observerTarget: null,
 };
@@ -129,10 +124,6 @@ function observe() {
       currentTab: mounted && state.videoId ? { videoId: state.videoId, tab: state.activeTab } : null,
     },
   };
-}
-
-function marker(name) {
-  return document.createComment(`${SCRIPT_ID}:${name}`);
 }
 
 function statusElement(kind) {
@@ -261,9 +252,11 @@ function saveActiveScrollTop() {
 }
 
 function recordPaneScroll(event) {
-  state.lastPaneScrollAt = performance.now();
   const pane = event.currentTarget;
-  if (isPaneShown(pane)) state.scrollTop[pane.dataset.tab] = pane.scrollTop;
+  const tab = pane.dataset.tab;
+  if (!isPaneShown(pane) || pane.scrollTop === state.scrollTop[tab]) return;
+  state.lastPaneScrollAt = performance.now();
+  state.scrollTop[tab] = pane.scrollTop;
 }
 
 function syncScrollbarInsets() {
@@ -317,160 +310,26 @@ function showToast(message) {
   }, 4_500);
 }
 
-function commentsUnavailable(node) {
-  if (!node?.querySelector('ytd-message-renderer, #message')) return false;
-  return !node.querySelector('ytd-comments-header-renderer, ytd-comment-thread-renderer');
-}
-
-function showCommentsUnavailable(generation, node) {
-  state.commentsReady = true;
-  clearTimeout(state.commentsTimeout);
+function showCommentsUnavailable() {
   setCommentsStatus(null);
   showToast(labels().unavailable);
-  clearTimeout(state.unavailableTimer);
   state.unavailableTimer = window.setTimeout(() => {
-    if (generation === state.generation && node === state.commentsNode && state.videoId === urlVideoId()) {
-      switchTab('related');
-    }
+    if (state.commentsLoader?.state === OFF && state.videoId === urlVideoId()) switchTab('related');
   }, 900);
 }
 
-function liveCommentsOff() {
-  const node = state.commentsNode;
-  if (!node?.hasAttribute('hidden') || node.firstElementChild) return false;
-  return Boolean(state.watch?.querySelector(`${SELECTORS.secondaryInner} ytd-live-chat-frame`));
-}
-
-function observeComments() {
-  state.commentsObserver?.disconnect();
-  if (!state.commentsNode) return;
-
-  const generation = state.generation;
-  const node = state.commentsNode;
-  let unavailable = false;
-  const check = () => {
-    if (generation !== state.generation || node !== state.commentsNode || state.videoId !== urlVideoId()) return;
-    if (commentsUnavailable(state.commentsNode)) {
-      if (!unavailable) {
-        unavailable = true;
-        showCommentsUnavailable(generation, node);
-      } else {
-        state.commentsReady = true;
-        clearTimeout(state.commentsTimeout);
-        setCommentsStatus(null);
-      }
-      return;
-    }
-
-    unavailable = false;
-    clearTimeout(state.unavailableTimer);
-    if (commentsHaveLoaded(state.commentsNode)) {
-      state.commentsReady = true;
-      clearTimeout(state.commentsTimeout);
-      setCommentsStatus(null);
-    }
-  };
-
-  clearTimeout(state.commentsCheckTimer);
-  state.commentsCheckTimer = 0;
-  state.commentsObserver = new MutationObserver(() => {
-    if (state.commentsCheckTimer) return;
-    state.commentsCheckTimer = window.setTimeout(() => {
-      state.commentsCheckTimer = 0;
-      check();
-    }, COMMENTS_CHECK_MS);
-  });
-  state.commentsObserver.observe(state.commentsNode, { childList: true, subtree: true });
-  check();
-}
-
-function commentsHaveLoaded(node) {
-  if (!node) return false;
-  return Boolean(node.querySelector(
-    'ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count'
-  ));
-}
-
-function findNativeComments(watch) {
-  if (!watch) return null;
-  const candidates = [...watch.querySelectorAll(SELECTORS.comments)];
-  return candidates.find((node) => !node.closest(`#${SCRIPT_ID}-root`) && node.closest(SELECTORS.primary)) || null;
-}
-
-function attachComments(generation) {
-  if (generation !== state.generation || !state.root?.isConnected) return true;
-  if (state.commentsNode) return state.commentsReady;
-  const comments = findNativeComments(state.watch);
-  if (!comments) return false;
-
-  state.commentsHome = comments.parentNode;
-  state.commentsMarker = marker('comments-home');
-  comments.parentNode.insertBefore(state.commentsMarker, comments);
-  state.commentsPane.appendChild(comments);
-  state.commentsNode = comments;
-  observeComments();
-
-  requestAnimationFrame(() => {
-    if (generation !== state.generation) return;
-    state.commentsPane?.dispatchEvent(new Event('scroll'));
-    window.dispatchEvent(new Event('scroll'));
-  });
-  return state.commentsReady;
-}
-
-function syncReplacedComments() {
-  const replacement = findNativeComments(state.watch);
-  const current = state.commentsNode;
-  if (!replacement && (!current || current.parentNode === state.commentsPane)) return;
-
-  state.commentsObserver?.disconnect();
-  clearTimeout(state.commentsCheckTimer);
-  state.commentsCheckTimer = 0;
-  clearTimeout(state.commentsTimeout);
+function reactToComments(commentsState) {
   clearTimeout(state.unavailableTimer);
-  if (replacement !== current && current?.parentNode === state.commentsPane) current.remove();
-  state.commentsMarker?.remove();
-  state.commentsMarker = null;
-  state.commentsHome = null;
-  state.commentsNode = null;
-  state.commentsReady = false;
-  setCommentsStatus('loading');
-  waitForComments(state.generation);
-}
-
-function waitForComments(generation, startedAt = performance.now()) {
-  clearTimeout(state.commentsTimeout);
-  if (attachComments(generation) || state.commentsReady) return;
-  if (generation !== state.generation || !state.root?.isConnected) return;
-
-  if (performance.now() - startedAt >= LIVE_COMMENTS_GRACE_MS && liveCommentsOff()) {
-    showCommentsUnavailable(generation, state.commentsNode);
-    return;
-  }
-
-  if (performance.now() - startedAt >= COMMENTS_WAIT_MS) {
-    setCommentsStatus('error');
-    return;
-  }
-
-  state.commentsTimeout = window.setTimeout(() => waitForComments(generation, startedAt), 300);
+  if (commentsState === LOADING) setCommentsStatus('loading');
+  else if (commentsState === FAILED) setCommentsStatus('error');
+  else if (commentsState === LOADED) setCommentsStatus(null);
+  else if (commentsState === OFF) showCommentsUnavailable();
 }
 
 function retryComments() {
   if (!state.root) return;
-  setCommentsStatus('loading');
   switchTab('comments');
-
-  if (state.commentsNode) {
-    state.commentsPane.scrollTop = Math.max(0, state.commentsPane.scrollHeight - state.commentsPane.clientHeight - 1);
-    state.commentsPane.dispatchEvent(new Event('scroll'));
-    const generation = state.generation;
-    requestAnimationFrame(() => {
-      if (generation === state.generation && state.commentsPane) state.commentsPane.scrollTop = 0;
-    });
-  }
-  window.dispatchEvent(new Event('scroll'));
-  waitForComments(state.generation);
+  state.commentsLoader.retry();
 }
 
 function observeSpecialPanels() {
@@ -495,29 +354,16 @@ function observeSpecialPanels() {
   });
 }
 
-function findNativeRelated(watch) {
-  const secondaryInner = watch?.querySelector(SELECTORS.secondaryInner);
-  if (!secondaryInner) return null;
-  return [...secondaryInner.children].find((child) => (
-    child.id === 'related' || child.matches('ytd-watch-next-secondary-results-renderer#related')
-  )) || null;
-}
-
 function syncReplacedRelated() {
   if (!state.root?.isConnected || !state.relatedPane) return;
-  const replacement = findNativeRelated(state.watch);
-  if (!replacement) return;
+  const region = state.relatedRegion;
+  if (!region.replaced(state.watch)) return;
 
   const savedScrollTop = state.activeTab === 'related' && isPaneShown(state.relatedPane)
     ? state.relatedPane.scrollTop
     : state.scrollTop.related;
 
-  if (state.relatedNode !== replacement && state.relatedNode?.parentElement === state.relatedPane) {
-    state.relatedNode.remove();
-  }
-
-  state.relatedPane.appendChild(replacement);
-  state.relatedNode = replacement;
+  if (!region.take(state.watch)) return;
   state.scrollTop.related = savedScrollTop;
 
   const generation = state.generation;
@@ -535,82 +381,46 @@ function applyHeld(held) {
 
 function mount(watch, initialTab) {
   const secondaryInner = watch?.querySelector(SELECTORS.secondaryInner);
-  const related = findNativeRelated(watch);
-  if (!secondaryInner || !related) return false;
+  if (!secondaryInner || !findNativeRelated(watch)) return false;
 
   state.generation += 1;
-  const generation = state.generation;
   state.watch = watch;
   state.videoId = urlVideoId();
   state.activeTab = initialTab;
   state.scrollTop = { comments: 0, related: 0 };
-  state.commentsReady = false;
 
   const root = buildRoot();
-  state.relatedMarker = marker('related-home');
-  related.parentNode.insertBefore(state.relatedMarker, related);
-  related.parentNode.insertBefore(root, related);
-  state.relatedPane.appendChild(related);
-  state.relatedNode = related;
+  state.relatedRegion = createRelatedRegion(state.relatedPane, root);
+  state.commentsRegion = createCommentsRegion(state.commentsPane, root);
+  state.commentsLoader = createCommentsLoader({
+    region: state.commentsRegion,
+    watch,
+    videoId: state.videoId,
+    onChange: reactToComments,
+  });
+  state.relatedRegion.take(watch, (related) => related.before(root));
 
   document.documentElement.classList.add(ACTIVE_CLASS);
   applyHeld(false);
   switchTab(initialTab, { reset: true });
   observeSpecialPanels();
-  waitForComments(generation);
+  state.commentsLoader.start();
   return true;
 }
 
-function restoreNode(node, homeMarker, kind, beforeNode = null) {
-  const watch = state.watch;
-  if (!node || !watch?.isConnected || watch.getAttribute('video-id') !== state.videoId) {
-    homeMarker?.remove();
-    return;
-  }
-  const native = kind === 'comments' ? findNativeComments(watch) : findNativeRelated(watch);
-  if (native) {
-    homeMarker?.remove();
-    return;
-  }
-  if (kind === 'related' && node.parentNode !== state.relatedPane) {
-    if (node.isConnected && watch.contains(node) && !state.root?.contains(node)) {
-      homeMarker?.remove();
-      return;
-    }
-    if (beforeNode?.isConnected && watch.contains(beforeNode) && !state.root?.contains(beforeNode)) {
-      beforeNode.before(node);
-      homeMarker?.remove();
-      return;
-    }
-  }
-  if (homeMarker?.isConnected && watch.contains(homeMarker)) {
-    homeMarker.replaceWith(node);
-    return;
-  }
-  const fallback = kind === 'comments'
-    ? (state.commentsHome?.isConnected && watch.contains(state.commentsHome)
-        ? state.commentsHome : watch.querySelector('#primary #below') || watch.querySelector(SELECTORS.primary))
-    : watch.querySelector(SELECTORS.secondaryInner);
-  fallback?.appendChild(node);
-  homeMarker?.remove();
-}
-
 function teardown() {
-  clearTimeout(state.mountTimeout);
   clearTimeout(state.unavailableTimer);
-  clearTimeout(state.commentsTimeout);
-  clearTimeout(state.commentsCheckTimer);
-  state.commentsCheckTimer = 0;
   clearTimeout(state.retryTimer);
   state.specialObserver?.disconnect();
-  state.commentsObserver?.disconnect();
   state.specialObserver = null;
-  state.commentsObserver = null;
+  state.commentsLoader?.dispose();
 
-  const relatedBeforeComments = state.relatedNode && state.relatedNode.nextElementSibling === state.commentsNode
-    ? state.commentsNode : null;
-  restoreNode(state.commentsNode, state.commentsMarker, 'comments');
-  restoreNode(state.relatedNode, state.relatedMarker, 'related', relatedBeforeComments);
+  const comments = state.commentsRegion;
+  const related = state.relatedRegion;
+  const relatedBeforeComments = related?.node && related.node.nextElementSibling === comments?.node
+    ? comments.node : null;
+  comments?.restore(state.watch, { videoId: state.videoId });
+  related?.restore(state.watch, { videoId: state.videoId, before: relatedBeforeComments });
   state.root?.remove();
   document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS);
 
@@ -618,12 +428,9 @@ function teardown() {
   state.root = null;
   state.commentsPane = null;
   state.relatedPane = null;
-  state.commentsNode = null;
-  state.relatedNode = null;
-  state.commentsMarker = null;
-  state.commentsHome = null;
-  state.relatedMarker = null;
-  state.commentsReady = false;
+  state.commentsRegion = null;
+  state.relatedRegion = null;
+  state.commentsLoader = null;
   state.videoId = null;
   state.watch = null;
 }
@@ -654,14 +461,14 @@ function evaluate() {
   refreshLabels();
   advanceLifecycle();
   if (state.root) {
-    syncReplacedComments();
+    state.commentsLoader.refresh();
     syncReplacedRelated();
     syncScrollbarInsets();
   }
 }
 
 function isInsideAdoptedContent(node) {
-  return Boolean(state.commentsNode?.contains(node) || state.relatedNode?.contains(node));
+  return Boolean(state.commentsRegion?.contains(node) || state.relatedRegion?.contains(node));
 }
 
 const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
@@ -752,7 +559,7 @@ function boot() {
   return () => {
     controller.abort();
     state.appObserver?.disconnect();
-    state.commentsObserver?.disconnect();
+    state.commentsLoader?.dispose();
     state.specialObserver?.disconnect();
   };
 }

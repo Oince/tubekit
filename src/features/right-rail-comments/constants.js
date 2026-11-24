@@ -12,5 +12,4 @@ export const SELECTORS = {
   secondary: '#secondary',
   secondaryInner: '#secondary-inner',
   related: 'ytd-watch-next-secondary-results-renderer#related, #related',
-  comments: 'ytd-comments#comments',
 };
