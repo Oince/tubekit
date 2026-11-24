@@ -7,12 +7,6 @@
         "chrome-devtools-mcp@latest",
         "--chrome-arg=--mute-audio"
       ]
-    },
-    "safari-mcp": {
-      "command": "/usr/bin/safaridriver",
-      "args": [
-        "--mcp"
-      ]
     }
   }
 }
