@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.7.4
+// @version      0.7.5
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -33,9 +33,38 @@
 	var AD_PLAYER_SELECTORS = AD_CLASSES.map((name) => `${PLAYER_SELECTOR}.${name}`);
 	var PLAYER_AREA_SELECTOR = `${PLAYER_SELECTOR}, ytd-player`;
 	var PRIMARY_SELECTOR = "#primary";
+	var SECONDARY_SELECTOR = "#secondary";
 	var SECONDARY_INNER_SELECTOR = "#secondary-inner";
+	var RELATED_SELECTORS = ["#related", "ytd-watch-next-secondary-results-renderer#related"];
 	var COMMENTS_SELECTOR = "ytd-comments#comments";
+	var COMMENTS_HOME_SELECTOR = `${PRIMARY_SELECTOR} #below`;
 	var COMMENTS_LOADED_SELECTOR = "ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count";
+	var PAGE_VIDEO_ID_ATTRIBUTE = "video-id";
+	var FULLSCREEN_ATTRIBUTE = "fullscreen";
+	var TWO_COLUMN_PRESENT = ["is-two-columns_"];
+	var TWO_COLUMN_ABSENT = ["theater", FULLSCREEN_ATTRIBUTE];
+	var TWO_COLUMN_SELECTOR = [
+		WATCH_SELECTOR,
+		...TWO_COLUMN_PRESENT.map((name) => `[${name}]`),
+		...TWO_COLUMN_ABSENT.map((name) => `:not([${name}])`)
+	].join("");
+	var NOT_TWO_COLUMN_SELECTORS = [...TWO_COLUMN_PRESENT.map((name) => `${WATCH_SELECTOR}:not([${name}])`), ...TWO_COLUMN_ABSENT.map((name) => `${WATCH_SELECTOR}[${name}]`)];
+	var SCREEN_ATTRIBUTES = [
+		...TWO_COLUMN_PRESENT,
+		...TWO_COLUMN_ABSENT,
+		PAGE_VIDEO_ID_ATTRIBUTE
+	];
+	var CHAT_FRAME_SELECTOR = "ytd-live-chat-frame";
+	var CHAT_COLLAPSED_ATTRIBUTE = "collapsed";
+	var PANEL_SELECTOR = "ytd-engagement-panel-section-list-renderer";
+	var PANEL_VISIBILITY_ATTRIBUTE = "visibility";
+	var PANEL_EXPANDED_VALUE = "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED";
+	var PANEL_COMMENTS_TARGET_ID = "engagement-panel-comments-section";
+	var YOUTUBE_PANEL_ATTRIBUTES = [
+		PANEL_VISIBILITY_ATTRIBUTE,
+		"hidden",
+		CHAT_COLLAPSED_ATTRIBUTE
+	];
 	function isDesktopSite() {
 		return location.hostname === "www.youtube.com";
 	}
@@ -81,6 +110,7 @@
 		const holder = player && typeof player.closest === "function" ? player.closest(WATCH_SELECTOR) : null;
 		if (holder) return holder;
 		const watches = [...document.querySelectorAll(WATCH_SELECTOR)];
+		if (watches.length <= 1) return watches[0] || null;
 		return watches.find((watch) => !watch.hidden && watch.getClientRects().length > 0) || watches.at(-1) || null;
 	}
 	function call(player, method, ...args) {
@@ -109,8 +139,34 @@
 	}
 	function pageFollowsUrl(watch) {
 		const videoId = urlVideoId();
-		const pageVideoId = watch?.getAttribute("video-id");
+		const pageVideoId = watch?.getAttribute(PAGE_VIDEO_ID_ATTRIBUTE);
 		return Boolean(videoId && pageVideoId && videoId === pageVideoId);
+	}
+	function findApp() {
+		return document.querySelector("ytd-app");
+	}
+	function isBrowserFullscreen() {
+		return Boolean(document.fullscreenElement);
+	}
+	function isFullscreen(watch) {
+		return isBrowserFullscreen() || Boolean(watch?.hasAttribute(FULLSCREEN_ATTRIBUTE));
+	}
+	function isTwoColumnScreen(watch) {
+		if (!watch || !isVideoPage() || isBrowserFullscreen()) return false;
+		return TWO_COLUMN_PRESENT.every((name) => watch.hasAttribute(name)) && TWO_COLUMN_ABSENT.every((name) => !watch.hasAttribute(name));
+	}
+	function findSecondaryInner(watch) {
+		return watch?.querySelector("#secondary-inner") || null;
+	}
+	function findCommentsHome(watch) {
+		return watch?.querySelector(COMMENTS_HOME_SELECTOR) || watch?.querySelector("#primary") || null;
+	}
+	function isYoutubePanelOpen(watch) {
+		const inner = findSecondaryInner(watch);
+		if (!inner) return false;
+		const chat = inner.querySelector(`${CHAT_FRAME_SELECTOR}:not([${CHAT_COLLAPSED_ATTRIBUTE}])`);
+		if (chat && chat.getClientRects().length > 0) return true;
+		return [...inner.querySelectorAll(`${PANEL_SELECTOR}[${PANEL_VISIBILITY_ATTRIBUTE}="${PANEL_EXPANDED_VALUE}"]`)].some((panel) => (panel.getAttribute("target-id") || "") !== PANEL_COMMENTS_TARGET_ID && panel.getClientRects().length > 0);
 	}
 	function videoAspectRatio(player) {
 		try {
@@ -180,12 +236,12 @@
 	var COMMENTS_OFF_LIVE_LOOK = "live-look";
 	function findNativeComments(watch, ignoreInside = null) {
 		if (!watch) return null;
-		return [...watch.querySelectorAll(COMMENTS_SELECTOR)].find((node) => !(ignoreInside && node.closest(ignoreInside)) && node.closest(PRIMARY_SELECTOR)) || null;
+		return [...watch.querySelectorAll("ytd-comments#comments")].find((node) => !(ignoreInside && node.closest(ignoreInside)) && node.closest("#primary")) || null;
 	}
 	function findNativeRelated(watch) {
-		const secondaryInner = watch?.querySelector(SECONDARY_INNER_SELECTOR);
+		const secondaryInner = findSecondaryInner(watch);
 		if (!secondaryInner) return null;
-		return [...secondaryInner.children].find((child) => child.id === "related" || child.matches("ytd-watch-next-secondary-results-renderer#related")) || null;
+		return [...secondaryInner.children].find((child) => child.matches(RELATED_SELECTORS.join(", "))) || null;
 	}
 	function commentsHaveLoaded(node) {
 		if (!node) return false;
@@ -194,7 +250,7 @@
 	function commentsOffCandidate(node, watch) {
 		if (!node) return null;
 		if (node.querySelector("ytd-message-renderer, #message") && !node.querySelector("ytd-comments-header-renderer, ytd-comment-thread-renderer")) return COMMENTS_OFF_BY_UPLOADER;
-		if (node.hasAttribute("hidden") && !node.firstElementChild && watch?.querySelector(`${SECONDARY_INNER_SELECTOR} ytd-live-chat-frame`)) return COMMENTS_OFF_LIVE_LOOK;
+		if (node.hasAttribute("hidden") && !node.firstElementChild && watch?.querySelector(`#secondary-inner ${CHAT_FRAME_SELECTOR}`)) return COMMENTS_OFF_LIVE_LOOK;
 		return null;
 	}
 	var QUALITY_HEIGHT = {
@@ -254,12 +310,6 @@
 		start: start$2
 	};
 	var SCRIPT_ID = "tubekit";
-	var SELECTORS = {
-		primary: "#primary",
-		secondary: "#secondary",
-		secondaryInner: "#secondary-inner",
-		related: "ytd-watch-next-secondary-results-renderer#related, #related"
-	};
 	function createBorrowedRegion({ pane, root, find, markerName, fallbackHome, yieldsToYouTubeMoves = false }) {
 		let node = null;
 		let marker = null;
@@ -340,7 +390,7 @@
 			root,
 			find: (watch) => findNativeComments(watch, `#${SCRIPT_ID}-root`),
 			markerName: "comments-home",
-			fallbackHome: (watch, home) => home?.isConnected && watch.contains(home) ? home : watch.querySelector("#primary #below") || watch.querySelector(SELECTORS.primary)
+			fallbackHome: (watch, home) => home?.isConnected && watch.contains(home) ? home : findCommentsHome(watch)
 		});
 	}
 	function createRelatedRegion(pane, root) {
@@ -349,10 +399,13 @@
 			root,
 			find: findNativeRelated,
 			markerName: "related-home",
-			fallbackHome: (watch) => watch.querySelector(SELECTORS.secondaryInner),
+			fallbackHome: findSecondaryInner,
 			yieldsToYouTubeMoves: true
 		});
 	}
+	var COMMENTS_WAIT_MS = 2e4;
+	var LIVE_COMMENTS_GRACE_MS = 3e3;
+	var COMMENTS_CHECK_MS = 250;
 	var LOADING = "loading";
 	var LOADED = "loaded";
 	var FAILED = "failed";
@@ -406,7 +459,7 @@
 				checkTimer = window.setTimeout(() => {
 					checkTimer = 0;
 					check();
-				}, 250);
+				}, COMMENTS_CHECK_MS);
 			});
 			observer.observe(node, {
 				childList: true,
@@ -430,15 +483,15 @@
 			if (adopt() || isDecided()) return;
 			if (disposed || !region.pane.isConnected) return;
 			const elapsed = performance.now() - startedAt;
-			if (elapsed >= 3e3 && commentsOffCandidate(region.node, watch) === "live-look") {
+			if (elapsed >= LIVE_COMMENTS_GRACE_MS && commentsOffCandidate(region.node, watch) === "live-look") {
 				settle("off");
 				return;
 			}
-			if (elapsed >= 2e4) {
+			if (elapsed >= COMMENTS_WAIT_MS) {
 				emit(FAILED);
 				return;
 			}
-			findTimer = window.setTimeout(() => wait(startedAt), 250);
+			findTimer = window.setTimeout(() => wait(startedAt), COMMENTS_CHECK_MS);
 		}
 		return {
 			get state() {
@@ -556,12 +609,14 @@
 			phase: RELEASED
 		};
 	}
+	var TWO_COLUMN_SCOPE = `${SHOWN_SCOPE} ${TWO_COLUMN_SELECTOR}`;
+	var ROOT_SELECTOR = `#${SCRIPT_ID}-root`;
 	function addStyles() {
 		if (document.getElementById(`tubekit-styles`)) return;
 		const style = document.createElement("style");
 		style.id = `${SCRIPT_ID}-styles`;
 		style.textContent = `
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary {
+    ${TWO_COLUMN_SCOPE} ${SECONDARY_SELECTOR} {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
@@ -574,7 +629,7 @@
       overflow-y: clip !important;
     }
 
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner {
+    ${TWO_COLUMN_SCOPE} ${SECONDARY_INNER_SELECTOR} {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -584,8 +639,7 @@
       overflow-y: clip !important;
     }
 
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > #related,
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > ytd-watch-next-secondary-results-renderer#related {
+    ${RELATED_SELECTORS.map((selector) => `${TWO_COLUMN_SCOPE} ${SECONDARY_INNER_SELECTOR} > ${selector}`).join(",\n    ")} {
       display: none !important;
     }
 
@@ -712,7 +766,7 @@
       max-width: 100% !important;
     }
 
-    #${SCRIPT_ID}-comments-pane > ytd-comments#comments {
+    #${SCRIPT_ID}-comments-pane > ${COMMENTS_SELECTOR} {
       box-sizing: border-box !important;
       width: 100% !important;
       max-width: none !important;
@@ -720,8 +774,7 @@
       padding: 8px 0 24px !important;
     }
 
-    #${SCRIPT_ID}-related-pane > #related,
-    #${SCRIPT_ID}-related-pane > ytd-watch-next-secondary-results-renderer#related {
+    ${RELATED_SELECTORS.map((selector) => `#${SCRIPT_ID}-related-pane > ${selector}`).join(",\n    ")} {
       box-sizing: border-box !important;
       display: block !important;
       width: 100% !important;
@@ -777,12 +830,14 @@
       transform: translateY(0);
     }
 
-    ytd-watch-flexy:not([is-two-columns_]) #${SCRIPT_ID}-root {
+    ${NOT_TWO_COLUMN_SELECTORS.map((selector) => `${selector} ${ROOT_SELECTOR}`).join(",\n    ")} {
       display: none !important;
     }
   `;
 		(document.head || document.documentElement).appendChild(style);
 	}
+	var SCROLLBAR_AREA_WIDTH = 14;
+	var SCROLL_IDLE_MS = 150;
 	var state = {
 		generation: 0,
 		videoId: null,
@@ -800,6 +855,7 @@
 			related: 0
 		},
 		lifecycle: initialLifecycle,
+		youtubePanelOpen: false,
 		evaluationTimer: 0,
 		lastPaneScrollAt: 0,
 		statusShown: false,
@@ -825,53 +881,35 @@
 			unavailable: "Comments are unavailable for this video. Showing related videos."
 		};
 	};
-	function isTheaterOrFullscreen(watch) {
-		return Boolean(document.fullscreenElement || watch?.hasAttribute("theater") || watch?.hasAttribute("fullscreen") || watch?.hasAttribute("full-bleed-player") || watch?.hasAttribute("miniplayer") || document.querySelector("ytd-miniplayer[active]"));
-	}
-	function isFullscreen(watch) {
-		return Boolean(document.fullscreenElement || watch?.hasAttribute("fullscreen"));
-	}
-	function isTwoColumnLayout(watch) {
-		if (!watch || !watch.hasAttribute("is-two-columns_")) return false;
-		const primary = watch.querySelector(SELECTORS.primary);
-		const secondary = watch.querySelector(SELECTORS.secondary);
-		if (!primary || !secondary) return false;
-		const primaryRect = primary.getBoundingClientRect();
-		const secondaryRect = secondary.getBoundingClientRect();
-		if (primaryRect.width < 1 || secondaryRect.width < 280) return false;
-		return secondaryRect.left >= primaryRect.right - 16;
-	}
 	function isEligible(watch) {
-		return isVideoPage() && pageFollowsUrl(watch) && isTwoColumnLayout(watch) && !isTheaterOrFullscreen(watch);
-	}
-	function isYoutubePanelOpen(watch) {
-		const inner = watch?.querySelector(SELECTORS.secondaryInner);
-		if (!inner) return false;
-		const chat = inner.querySelector("#chat-container ytd-live-chat-frame:not([collapsed]), ytd-live-chat-frame:not([collapsed])");
-		if (chat && chat.getClientRects().length > 0) return true;
-		return [...inner.querySelectorAll("ytd-engagement-panel-section-list-renderer[visibility=\"ENGAGEMENT_PANEL_VISIBILITY_EXPANDED\"]")].some((panel) => {
-			return (panel.getAttribute("target-id") || "") !== "engagement-panel-comments-section" && panel.getClientRects().length > 0;
-		});
+		return isTwoColumnScreen(watch) && pageFollowsUrl(watch);
 	}
 	function isRootBroken(watch) {
-		return !state.root.isConnected || state.root.parentNode !== watch?.querySelector(SELECTORS.secondaryInner) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane);
+		return !state.root.isConnected || state.root.parentNode !== findSecondaryInner(watch) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane);
 	}
 	function isWrongGeneration(watch) {
 		return state.watch !== watch || state.videoId !== urlVideoId() || !pageFollowsUrl(watch);
 	}
-	function observe() {
+	function observe(measurePanel) {
 		const watch = findWatch();
 		const mounted = Boolean(state.root);
+		const twoColumn = isEligible(watch);
+		const fullscreen = isFullscreen(watch);
+		const wrongGeneration = mounted && isWrongGeneration(watch);
+		const brokenRoot = mounted && isRootBroken(watch);
+		const phase = state.lifecycle.phase;
+		const mayReveal = twoColumn && (phase === "released" || wrongGeneration || brokenRoot || phase === "held" && !fullscreen && !state.youtubePanelOpen);
+		if (measurePanel || mayReveal) state.youtubePanelOpen = isYoutubePanelOpen(watch);
 		return {
 			watch,
 			observation: {
 				navigating: false,
 				videoId: urlVideoId(),
-				twoColumn: isEligible(watch),
-				fullscreen: isFullscreen(watch),
-				youtubePanel: isYoutubePanelOpen(watch),
-				wrongGeneration: mounted && isWrongGeneration(watch),
-				brokenRoot: mounted && isRootBroken(watch),
+				twoColumn,
+				fullscreen,
+				youtubePanel: state.youtubePanelOpen,
+				wrongGeneration,
+				brokenRoot,
 				currentTab: mounted && state.videoId ? {
 					videoId: state.videoId,
 					tab: state.activeTab
@@ -997,8 +1035,8 @@
 		const pane = state.activeTab === "comments" ? state.commentsPane : state.relatedPane;
 		if (!state.root || !pane || pane.offsetWidth === 0) return;
 		const scrollbar = Math.max(0, pane.offsetWidth - pane.clientWidth);
-		setRootVariable("pane-gutter", `${Math.max(0, 14 - scrollbar)}px`);
-		setRootVariable("content-inset", `${Math.max(scrollbar, 14)}px`);
+		setRootVariable("pane-gutter", `${Math.max(0, SCROLLBAR_AREA_WIDTH - scrollbar)}px`);
+		setRootVariable("content-inset", `${Math.max(scrollbar, SCROLLBAR_AREA_WIDTH)}px`);
 	}
 	function setRootVariable(name, value) {
 		const property = `--${SCRIPT_ID}-${name}`;
@@ -1058,7 +1096,7 @@
 	}
 	function observeSpecialPanels() {
 		state.specialObserver?.disconnect();
-		const inner = state.watch?.querySelector(SELECTORS.secondaryInner);
+		const inner = findSecondaryInner(state.watch);
 		if (!inner) return;
 		const generation = state.generation;
 		let pending = false;
@@ -1072,11 +1110,7 @@
 		});
 		state.specialObserver.observe(inner, {
 			attributes: true,
-			attributeFilter: [
-				"visibility",
-				"hidden",
-				"collapsed"
-			],
+			attributeFilter: YOUTUBE_PANEL_ATTRIBUTES,
 			childList: true,
 			subtree: true
 		});
@@ -1098,7 +1132,7 @@
 		state.root.dataset.suspended = String(held);
 	}
 	function mount(watch, initialTab) {
-		if (!watch?.querySelector(SELECTORS.secondaryInner) || !findNativeRelated(watch)) return false;
+		if (!findSecondaryInner(watch) || !findNativeRelated(watch)) return false;
 		state.generation += 1;
 		state.watch = watch;
 		state.videoId = urlVideoId();
@@ -1158,8 +1192,8 @@
 		unhide: () => applyHeld(false),
 		restoreTab: () => switchTab(state.activeTab, { keepSaved: true })
 	};
-	function advanceLifecycle(facts = {}) {
-		const { watch, observation } = observe();
+	function advanceLifecycle(facts = {}, { measurePanel = true } = {}) {
+		const { watch, observation } = observe(measurePanel);
 		const { state: next, effects } = step(state.lifecycle, {
 			...observation,
 			...facts
@@ -1186,10 +1220,15 @@
 	var isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
 	var isIdleOffWatch = () => !state.root && !isVideoPage();
 	var onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
+	function onAppMutations(records) {
+		if (isIdleOffWatch() || onlyIrrelevantChanges(records)) return;
+		advanceLifecycle({}, { measurePanel: false });
+		scheduleEvaluation();
+	}
 	function scheduleEvaluation(delay = 80) {
 		clearTimeout(state.evaluationTimer);
 		const run = () => {
-			const wait = 150 - (performance.now() - state.lastPaneScrollAt);
+			const wait = SCROLL_IDLE_MS - (performance.now() - state.lastPaneScrollAt);
 			if (state.lastPaneScrollAt > 0 && wait > 0) {
 				state.evaluationTimer = window.setTimeout(run, wait);
 				return;
@@ -1199,24 +1238,14 @@
 		state.evaluationTimer = window.setTimeout(run, delay);
 	}
 	function retargetObserver() {
-		const target = document.querySelector("ytd-app") || document.documentElement;
+		const target = findApp() || document.documentElement;
 		if (!target || target === state.observerTarget) return;
 		state.appObserver?.disconnect();
 		state.observerTarget = target;
-		state.appObserver = new MutationObserver((records) => {
-			if (isIdleOffWatch()) return;
-			if (!onlyIrrelevantChanges(records)) scheduleEvaluation();
-		});
+		state.appObserver = new MutationObserver(onAppMutations);
 		state.appObserver.observe(target, {
 			attributes: true,
-			attributeFilter: [
-				"theater",
-				"fullscreen",
-				"full-bleed-player",
-				"miniplayer",
-				"is-two-columns_",
-				"video-id"
-			],
+			attributeFilter: SCREEN_ATTRIBUTES,
 			childList: true,
 			subtree: true
 		});
@@ -1226,7 +1255,7 @@
 		scheduleEvaluation(150);
 	}
 	function onFullscreenChange() {
-		if (document.fullscreenElement) advanceLifecycle({ fullscreen: true });
+		if (isBrowserFullscreen()) advanceLifecycle({ fullscreen: true });
 		scheduleEvaluation(0);
 	}
 	function onUrlChanged() {
@@ -1238,14 +1267,14 @@
 		addStyles();
 		state.appObserver = new MutationObserver((records) => {
 			retargetObserver();
-			if (isIdleOffWatch()) return;
-			if (!onlyIrrelevantChanges(records)) scheduleEvaluation();
+			onAppMutations(records);
 		});
 		state.observerTarget = document.documentElement;
 		state.appObserver.observe(document.documentElement, {
 			childList: true,
 			subtree: true
 		});
+		retargetObserver();
 		const controller = new AbortController();
 		const { signal } = controller;
 		const capture = {

@@ -1,4 +1,3 @@
-import { COMMENTS_CHECK_MS, COMMENTS_WAIT_MS, LIVE_COMMENTS_GRACE_MS } from './constants.js';
 import {
   COMMENTS_OFF_BY_UPLOADER,
   COMMENTS_OFF_LIVE_LOOK,
@@ -6,6 +5,10 @@ import {
   commentsOffCandidate,
   urlVideoId,
 } from '../../core/youtube.js';
+
+const COMMENTS_WAIT_MS = 20_000;
+const LIVE_COMMENTS_GRACE_MS = 3_000;
+const COMMENTS_CHECK_MS = 250;
 
 export const LOADING = 'loading';
 export const LOADED = 'loaded';

@@ -136,17 +136,12 @@ export function stubProperty(target, name, descriptor) {
   });
 }
 
-export function rectsById(byId, fallback = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }) {
-  return element => byId[element.id] || fallback;
-}
-
 export function loadPage({
   url = 'https://www.youtube.com/watch?v=A',
   html = '<html><head></head><body></body></html>',
   body,
   innerWidth = 1024,
   innerHeight = 768,
-  rect,
   clientRects = false,
   frame = false,
   timers = FAKED_TIMERS,
@@ -162,7 +157,6 @@ export function loadPage({
   clearBrowserState();
   window.innerWidth = innerWidth;
   window.innerHeight = innerHeight;
-  if (rect) vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () { return rect(this); });
   if (clientRects) {
     const list = typeof clientRects === 'function' ? clientRects : () => [{}];
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function () { return list(this); });

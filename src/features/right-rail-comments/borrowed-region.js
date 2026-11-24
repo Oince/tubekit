@@ -1,5 +1,5 @@
-import { SCRIPT_ID, SELECTORS } from './constants.js';
-import { findNativeComments, findNativeRelated } from '../../core/youtube.js';
+import { SCRIPT_ID } from './constants.js';
+import { findCommentsHome, findNativeComments, findNativeRelated, findSecondaryInner } from '../../core/youtube.js';
 
 export function createBorrowedRegion({ pane, root, find, markerName, fallbackHome, yieldsToYouTubeMoves = false }) {
   let node = null;
@@ -93,9 +93,7 @@ export function createCommentsRegion(pane, root) {
     find: (watch) => findNativeComments(watch, `#${SCRIPT_ID}-root`),
     markerName: 'comments-home',
     fallbackHome: (watch, home) => (
-      home?.isConnected && watch.contains(home)
-        ? home
-        : watch.querySelector('#primary #below') || watch.querySelector(SELECTORS.primary)
+      home?.isConnected && watch.contains(home) ? home : findCommentsHome(watch)
     ),
   });
 }
@@ -106,7 +104,7 @@ export function createRelatedRegion(pane, root) {
     root,
     find: findNativeRelated,
     markerName: 'related-home',
-    fallbackHome: (watch) => watch.querySelector(SELECTORS.secondaryInner),
+    fallbackHome: findSecondaryInner,
     yieldsToYouTubeMoves: true,
   });
 }

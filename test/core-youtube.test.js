@@ -2,20 +2,31 @@ import { expect, test } from 'vitest';
 import {
   COMMENTS_OFF_BY_UPLOADER,
   COMMENTS_OFF_LIVE_LOOK,
+  NOT_TWO_COLUMN_SELECTORS,
+  SCREEN_ATTRIBUTES,
+  TWO_COLUMN_SELECTOR,
+  YOUTUBE_PANEL_ATTRIBUTES,
   availableQualities,
   commentsHaveLoaded,
   commentsOffCandidate,
   currentVideoId,
   findNativeComments,
+  findApp,
+  findCommentsHome,
   findNativeRelated,
+  findSecondaryInner,
   findWatch,
   isAdShowing,
+  isBrowserFullscreen,
   isEmbedShortsOrChatPage,
+  isFullscreen,
   isPlayerArea,
   isPlaying,
   isStopped,
+  isTwoColumnScreen,
   isVideoId,
   isVideoPage,
+  isYoutubePanelOpen,
   pageFollowsUrl,
   playerFollowsVideo,
   playerOfMediaEvent,
@@ -27,7 +38,7 @@ import {
   videoContentRect,
   videoKeywords,
 } from '../src/core/youtube.js';
-import { fakePlayer, loadPage } from './helpers.js';
+import { fakePlayer, loadPage, stubProperty } from './helpers.js';
 
 function playerPage(url = 'https://www.youtube.com/watch?v=A') {
   loadPage({ url, body: '<ytd-watch-flexy video-id="A"><div id="movie_player"><video></video></div></ytd-watch-flexy>' });
@@ -280,4 +291,114 @@ test('a comments off candidate is the uploader turning them off, a live broadcas
   expect(commentsOffCandidate(null, null)).toBe(null);
   const { node } = commentsPage('', ' hidden');
   expect(commentsOffCandidate(node, null)).toBe(null);
+});
+
+function watchPage(attributes = '', url = 'https://www.youtube.com/watch?v=A') {
+  loadPage({ url, body: `<ytd-watch-flexy video-id="A" ${attributes}></ytd-watch-flexy>` });
+  return document.querySelector('ytd-watch-flexy');
+}
+
+test('the two-column screen is a video page whose watch has the two-column mark and neither theater nor fullscreen', () => {
+  const cases = [
+    ['the two-column mark alone', 'is-two-columns_', true],
+    ['no two-column mark', '', false],
+    ['theater', 'is-two-columns_ theater', false],
+    ['theater with full-bleed-player', 'is-two-columns_ theater full-bleed-player', false],
+    ['the fullscreen mark', 'is-two-columns_ fullscreen', false],
+    ['full-bleed-player alone is not a reason', 'is-two-columns_ full-bleed-player', true],
+    ['the miniplayer mark is not a reason', 'is-two-columns_ miniplayer', true],
+    ['a hidden watch still counts', 'is-two-columns_ hidden', true],
+  ];
+  for (const [name, attributes, expected] of cases) {
+    const watch = watchPage(attributes);
+    expect(isTwoColumnScreen(watch), name).toBe(expected);
+    expect(watch.matches(TWO_COLUMN_SELECTOR), `${name}: selector`).toBe(expected);
+    expect(NOT_TWO_COLUMN_SELECTORS.some(selector => watch.matches(selector)), `${name}: negated selectors`).toBe(!expected);
+  }
+  expect(isTwoColumnScreen(null)).toBe(false);
+});
+
+test('the two-column screen needs a video page and is not the browser fullscreen', () => {
+  const watch = watchPage('is-two-columns_', 'https://www.youtube.com/');
+  expect(isTwoColumnScreen(watch)).toBe(false);
+  history.replaceState(null, '', '/shorts/abcdefghijk');
+  expect(isTwoColumnScreen(watch)).toBe(false);
+  history.replaceState(null, '', '/watch?v=A');
+  expect(isTwoColumnScreen(watch)).toBe(true);
+  stubProperty(document, 'fullscreenElement', { get: () => document.documentElement });
+  expect(isTwoColumnScreen(watch)).toBe(false);
+});
+
+test('the app element is found by the adapter', () => {
+  loadPage({ body: '<ytd-app></ytd-app>' });
+  expect(findApp()).toBe(document.querySelector('ytd-app'));
+  loadPage({ body: '' });
+  expect(findApp()).toBe(null);
+});
+
+test('fullscreen is the browser fullscreen or the watch fullscreen mark', () => {
+  expect(isBrowserFullscreen()).toBe(false);
+  expect(isFullscreen(watchPage('is-two-columns_'))).toBe(false);
+  expect(isFullscreen(watchPage('fullscreen'))).toBe(true);
+  expect(isFullscreen(null)).toBe(false);
+  stubProperty(document, 'fullscreenElement', { get: () => document.documentElement });
+  expect(isFullscreen(null)).toBe(true);
+  expect(isBrowserFullscreen()).toBe(true);
+});
+
+test('the screen attributes hold every attribute the two-column definition, its selectors and the page video read', () => {
+  const named = selector => [...selector.matchAll(/\[([^\]=]+)\]/g)].map(match => match[1]);
+  const fromSelectors = new Set([TWO_COLUMN_SELECTOR, ...NOT_TWO_COLUMN_SELECTORS].flatMap(named));
+  expect(fromSelectors.size).toBeGreaterThan(0);
+  for (const name of fromSelectors) expect(SCREEN_ATTRIBUTES, name).toContain(name);
+  expect(SCREEN_ATTRIBUTES).toContain('video-id');
+  for (const name of SCREEN_ATTRIBUTES.filter(name => name !== 'video-id')) {
+    expect(fromSelectors, name).toContain(name);
+  }
+  for (const name of SCREEN_ATTRIBUTES.filter(name => name !== 'video-id')) {
+    const on = watchPage(['is-two-columns_', name].join(' '));
+    const off = watchPage(name === 'is-two-columns_' ? '' : 'is-two-columns_');
+    expect(isTwoColumnScreen(on) !== isTwoColumnScreen(off), `${name} decides the answer`).toBe(true);
+  }
+});
+
+function panelPage(inner) {
+  loadPage({
+    body: `<ytd-watch-flexy video-id="A"><div id="secondary"><div id="secondary-inner">${inner}</div></div></ytd-watch-flexy>`,
+    clientRects: true,
+  });
+  return document.querySelector('ytd-watch-flexy');
+}
+
+test('a YouTube panel is an uncollapsed live chat or an expanded engagement panel other than the comments one, and it must be shown', () => {
+  const expanded = target => `<ytd-engagement-panel-section-list-renderer target-id="${target}" visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"></ytd-engagement-panel-section-list-renderer>`;
+  const cases = [
+    ['nothing', '', false],
+    ['a live chat', '<ytd-live-chat-frame></ytd-live-chat-frame>', true],
+    ['a live chat inside its container', '<div id="chat-container"><ytd-live-chat-frame></ytd-live-chat-frame></div>', true],
+    ['a collapsed live chat', '<ytd-live-chat-frame collapsed></ytd-live-chat-frame>', false],
+    ['an expanded panel', expanded('engagement-panel-structured-description'), true],
+    ['the expanded comments panel', expanded('engagement-panel-comments-section'), false],
+    ['a hidden panel', '<ytd-engagement-panel-section-list-renderer visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"></ytd-engagement-panel-section-list-renderer>', false],
+  ];
+  for (const [name, inner, expected] of cases) {
+    expect(isYoutubePanelOpen(panelPage(inner)), name).toBe(expected);
+  }
+  expect(isYoutubePanelOpen(null)).toBe(false);
+  const watch = panelPage('<ytd-live-chat-frame></ytd-live-chat-frame>');
+  watch.querySelector('ytd-live-chat-frame').getClientRects = () => [];
+  expect(isYoutubePanelOpen(watch)).toBe(false);
+  expect(YOUTUBE_PANEL_ATTRIBUTES).toStrictEqual(['visibility', 'hidden', 'collapsed']);
+});
+
+test('the secondary column and the comments home are found by the adapter', () => {
+  const watch = panelPage('');
+  expect(findSecondaryInner(watch)).toBe(document.querySelector('#secondary-inner'));
+  expect(findSecondaryInner(null)).toBe(null);
+  expect(findCommentsHome(watch)).toBe(null);
+  const { watch: full } = commentsPage('');
+  expect(findCommentsHome(full)).toBe(document.querySelector('#below'));
+  document.querySelector('#below').remove();
+  expect(findCommentsHome(full)).toBe(document.querySelector('#primary'));
+  expect(findCommentsHome(null)).toBe(null);
 });

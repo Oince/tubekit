@@ -72,9 +72,6 @@ test('video-rotation: rotating beside the comments panel neither tears it down n
     </div></div></ytd-watch-flexy></ytd-app></body></html>`,
     innerWidth: 1440,
     clientRects: true,
-    rect: element => element.id === 'primary'
-      ? { width: 888, left: 0, right: 888, top: 0 }
-      : { width: 520, left: 920, right: 1440, top: 0 },
   });
   const player = fakePlayer();
   await startMain();

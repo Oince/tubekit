@@ -1,5 +1,16 @@
 import { SCRIPT_ID } from './constants.js';
 import { HELD_STYLES, SHOWN_SCOPE } from './lifecycle.js';
+import {
+  COMMENTS_SELECTOR,
+  NOT_TWO_COLUMN_SELECTORS,
+  RELATED_SELECTORS,
+  SECONDARY_INNER_SELECTOR,
+  SECONDARY_SELECTOR,
+  TWO_COLUMN_SELECTOR,
+} from '../../core/youtube.js';
+
+const TWO_COLUMN_SCOPE = `${SHOWN_SCOPE} ${TWO_COLUMN_SELECTOR}`;
+const ROOT_SELECTOR = `#${SCRIPT_ID}-root`;
 
 export function addStyles() {
   if (document.getElementById(`${SCRIPT_ID}-styles`)) return;
@@ -7,7 +18,7 @@ export function addStyles() {
   const style = document.createElement('style');
   style.id = `${SCRIPT_ID}-styles`;
   style.textContent = `
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary {
+    ${TWO_COLUMN_SCOPE} ${SECONDARY_SELECTOR} {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
@@ -20,7 +31,7 @@ export function addStyles() {
       overflow-y: clip !important;
     }
 
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner {
+    ${TWO_COLUMN_SCOPE} ${SECONDARY_INNER_SELECTOR} {
       display: flex !important;
       flex-direction: column !important;
       height: 100% !important;
@@ -30,8 +41,7 @@ export function addStyles() {
       overflow-y: clip !important;
     }
 
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > #related,
-    ${SHOWN_SCOPE} ytd-watch-flexy #secondary-inner > ytd-watch-next-secondary-results-renderer#related {
+    ${RELATED_SELECTORS.map(selector => `${TWO_COLUMN_SCOPE} ${SECONDARY_INNER_SELECTOR} > ${selector}`).join(',\n    ')} {
       display: none !important;
     }
 
@@ -158,7 +168,7 @@ export function addStyles() {
       max-width: 100% !important;
     }
 
-    #${SCRIPT_ID}-comments-pane > ytd-comments#comments {
+    #${SCRIPT_ID}-comments-pane > ${COMMENTS_SELECTOR} {
       box-sizing: border-box !important;
       width: 100% !important;
       max-width: none !important;
@@ -166,8 +176,7 @@ export function addStyles() {
       padding: 8px 0 24px !important;
     }
 
-    #${SCRIPT_ID}-related-pane > #related,
-    #${SCRIPT_ID}-related-pane > ytd-watch-next-secondary-results-renderer#related {
+    ${RELATED_SELECTORS.map(selector => `#${SCRIPT_ID}-related-pane > ${selector}`).join(',\n    ')} {
       box-sizing: border-box !important;
       display: block !important;
       width: 100% !important;
@@ -223,7 +232,7 @@ export function addStyles() {
       transform: translateY(0);
     }
 
-    ytd-watch-flexy:not([is-two-columns_]) #${SCRIPT_ID}-root {
+    ${NOT_TWO_COLUMN_SELECTORS.map(selector => `${selector} ${ROOT_SELECTOR}`).join(',\n    ')} {
       display: none !important;
     }
   `;

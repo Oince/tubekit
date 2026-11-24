@@ -4,17 +4,11 @@ import { createCommentsLoader } from '../src/features/right-rail-comments/commen
 import { initialLifecycle, mountFailed, step } from '../src/features/right-rail-comments/lifecycle.js';
 import { advance, loadPage, onCleanup, startFeature, stubProperty } from './helpers.js';
 
-const HIDDEN_RECT = { width: 0, left: 0, right: 0 };
-const layout = { hidden: false, primary: null, secondary: null };
+const layout = { hidden: false };
 
-function columnRects(primary, secondary) {
+function shownRects() {
   layout.hidden = false;
-  layout.primary = primary;
-  layout.secondary = secondary;
-  return {
-    rect: element => layout.hidden ? HIDDEN_RECT : element.id === 'primary' ? layout.primary : layout.secondary,
-    clientRects: () => layout.hidden ? [] : [{}],
-  };
+  return { clientRects: () => layout.hidden ? [] : [{}] };
 }
 
 async function setup({
@@ -22,8 +16,8 @@ async function setup({
   disabledText = 'Comments are turned off',
   innerWidth = 1440,
   twoColumns = true,
-  primary = { width: 900, left: 0, right: 900 },
-  secondary = { width: 400, left: 920, right: 1320 },
+  watchAttrs = '',
+  beforeStart = () => {},
   expectRoot = true,
   htmlAttrs = '',
   liveStream = false,
@@ -34,18 +28,19 @@ async function setup({
   loadPage({
     url: 'https://www.youtube.com/watch?v=A',
     html: `<html lang="en" ${htmlAttrs}><head></head><body><ytd-app>
-    <ytd-watch-flexy video-id="A"${twoColumns ? ' is-two-columns_' : ''}><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
+    <ytd-watch-flexy video-id="A"${twoColumns ? ' is-two-columns_' : ''}${watchAttrs}><div id="primary"><ytd-player><div id="movie_player"></div></ytd-player><div id="below">
       <ytd-comments id="comments"${liveStream ? ' hidden disable-upgrade' : ''}>${content}</ytd-comments>
     </div></div><div id="secondary"><div id="secondary-inner">
       <div id="related">related</div>
     </div></div></ytd-watch-flexy></ytd-app></body></html>`,
     innerWidth,
-    ...columnRects(primary, secondary),
+    ...shownRects(),
   });
-  await startFeature('right-rail-comments');
+  beforeStart();
+  const { stop } = await startFeature('right-rail-comments');
   await advance(200);
   if (expectRoot) expect(document.querySelector('#tubekit-root')).toBeTruthy();
-  return { document, watch: document.querySelector('ytd-watch-flexy') };
+  return { document, stop, watch: document.querySelector('ytd-watch-flexy') };
 }
 
 async function mutationsSettle() {
@@ -103,20 +98,12 @@ test('mobile: right rail comments panel does not run on m.youtube.com', async ()
 });
 
 test('iPad Pro 11-inch Sidecar landscape creates the panel at 1194px', async () => {
-  const { document } = await setup({
-    innerWidth: 1194,
-    primary: { width: 780, left: 16, right: 796 },
-    secondary: { width: 398, left: 796, right: 1194 },
-  });
+  const { document } = await setup({ innerWidth: 1194 });
   expect(document.querySelector('#tubekit-root')).toBeTruthy();
 });
 
 test('overlay scrollbar two-column layout below 1015px still creates the panel', async () => {
-  const { document } = await setup({
-    innerWidth: 1014,
-    primary: { width: 656, left: 16, right: 672 },
-    secondary: { width: 336, left: 672, right: 1008 },
-  });
+  const { document } = await setup({ innerWidth: 1014 });
   expect(document.querySelector('#tubekit-root')).toBeTruthy();
 });
 
@@ -125,19 +112,171 @@ test('one-column layout does not create the panel', async () => {
   expect(document.querySelector('#tubekit-root')).toBe(null);
 });
 
-test('two-column attribute without side-by-side columns does not create the panel', async () => {
-  const { document } = await setup({
-    secondary: { width: 400, left: 0, right: 400 },
+test.each([
+  ['theater attribute', ' theater'],
+  ['fullscreen attribute', ' fullscreen'],
+  ['theater attribute together with full-bleed-player', ' theater full-bleed-player'],
+])('a two-column watch with the %s does not create the panel', async (_name, watchAttrs) => {
+  const { document } = await setup({ watchAttrs, expectRoot: false });
+  expect(document.querySelector('#tubekit-root')).toBe(null);
+});
+
+test('the browser fullscreen alone, without any watch attribute, does not create the panel', async () => {
+  await setup({
+    beforeStart: () => stubProperty(document, 'fullscreenElement', { get: () => document.documentElement }),
     expectRoot: false,
   });
   expect(document.querySelector('#tubekit-root')).toBe(null);
 });
 
-test('CSS hides the panel while YouTube is not in the two-column layout', async () => {
+test('YouTube markers that no longer decide the two-column screen are ignored', async () => {
+  const { document } = await setup({ watchAttrs: ' miniplayer' });
+  expect(document.querySelector('#tubekit-root')).toBeTruthy();
+  document.body.insertAdjacentHTML('beforeend', '<ytd-miniplayer active></ytd-miniplayer>');
+  document.querySelector('ytd-watch-flexy').setAttribute('full-bleed-player', '');
+  await advance(300);
+  expect(document.querySelector('#tubekit-root')).toBeTruthy();
+});
+
+test('a hidden watch page still counts as the two-column screen', async () => {
+  const { document } = await setup({ watchAttrs: ' hidden' });
+  expect(document.querySelector('#tubekit-root')).toBeTruthy();
+});
+
+test('CSS hides the panel and releases the right column overrides in every state outside the two-column screen', async () => {
+  const { document, watch, stop } = await setup();
+  stop();
+  const secondary = document.querySelector('#secondary');
+  const probe = document.createElement('div');
+  probe.id = 'tubekit-root';
+  document.querySelector('#below').append(probe);
+  const states = [
+    ['two columns', () => {}, true],
+    ['one column', () => watch.removeAttribute('is-two-columns_'), false],
+    ['two columns again', () => watch.setAttribute('is-two-columns_', ''), true],
+    ['theater', () => watch.setAttribute('theater', ''), false],
+    ['theater with fullscreen', () => watch.setAttribute('fullscreen', ''), false],
+    ['fullscreen only', () => watch.removeAttribute('theater'), false],
+    ['back to two columns', () => watch.removeAttribute('fullscreen'), true],
+  ];
+  for (const [name, apply, twoColumn] of states) {
+    apply();
+    expect(getComputedStyle(probe).display, `${name}: panel root`).toBe(twoColumn ? 'flex' : 'none');
+    const clipped = getComputedStyle(secondary).overflowY === 'clip';
+    expect(clipped, `${name}: right column overrides`).toBe(twoColumn);
+    const sticky = getComputedStyle(secondary).position === 'sticky';
+    expect(sticky, `${name}: sticky right column`).toBe(twoColumn);
+  }
+});
+
+test('the app observer watches every attribute the two-column screen and the page video are read from', async () => {
+  const filters = [];
+  const original = MutationObserver.prototype.observe;
+  loadPage({ html: '<html lang="en"><head></head><body><ytd-app></ytd-app></body></html>', ...shownRects() });
+  vi.spyOn(MutationObserver.prototype, 'observe').mockImplementation(function (target, options) {
+    if (options?.attributeFilter) filters.push(...options.attributeFilter);
+    return original.call(this, target, options);
+  });
+  await startFeature('right-rail-comments');
+  document.body.append(document.createElement('div'));
+  await advance(200);
+  for (const name of ['is-two-columns_', 'theater', 'fullscreen', 'video-id']) expect(filters, name).toContain(name);
+});
+
+test('the theater attribute takes the panel down and returns the related list at once, without advancing timers', async () => {
+  const { document, watch } = await setup();
+  const related = document.querySelector('#related');
+  const comments = document.querySelector('#comments');
+  watch.setAttribute('theater', '');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBe(null);
+  expect(document.querySelector('#secondary-inner > #related')).toBe(related);
+  expect(document.querySelector('#below > #comments')).toBe(comments);
+  expect(document.documentElement.classList.contains('tubekit-active')).toBe(false);
+});
+
+test('removing the theater attribute stands the panel up at once, without advancing timers', async () => {
+  const { document, watch } = await setup({ watchAttrs: ' theater', expectRoot: false });
+  expect(document.querySelector('#tubekit-root')).toBe(null);
+  watch.removeAttribute('theater');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBeTruthy();
+  expect(document.querySelector('#tubekit-related-pane #related')).toBeTruthy();
+  expect(document.querySelector('#tubekit-comments-pane #comments')).toBeTruthy();
+});
+
+test('the two-column attribute appearing stands the panel up at once, and its removal takes it down at once', async () => {
+  const { document, watch } = await setup({ twoColumns: false, expectRoot: false });
+  watch.setAttribute('is-two-columns_', '');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBeTruthy();
+  watch.removeAttribute('is-two-columns_');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBe(null);
+  expect(document.querySelector('#secondary-inner > #related')).toBeTruthy();
+});
+
+test('the fullscreen attribute holds the panel at once, and removing it shows the panel again at once', async () => {
+  const { document, watch } = await setup();
+  const root = document.querySelector('#tubekit-root');
+  watch.setAttribute('fullscreen', '');
+  await mutationsSettle();
+  expect(root.dataset.suspended).toBe('true');
+  watch.removeAttribute('fullscreen');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBe(root);
+  expect(root.dataset.suspended).toBe('false');
+});
+
+test('a change in the watch video-id takes the old panel down at once', async () => {
+  const { document, watch } = await setup();
+  history.pushState({}, '', '/watch?v=B');
+  watch.setAttribute('video-id', 'B');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBe(null);
+});
+
+test('the immediate decision still waits for a related list, then stands the panel up on the next change', async () => {
+  const { document, watch } = await setup({ watchAttrs: ' theater', expectRoot: false });
+  const related = document.querySelector('#related');
+  related.remove();
+  watch.removeAttribute('theater');
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBe(null);
+  document.querySelector('#secondary-inner').append(related);
+  await mutationsSettle();
+  expect(document.querySelector('#tubekit-root')).toBeTruthy();
+});
+
+test('the immediate decision ignores changes inside the adopted comments but not other changes', async () => {
   const { document } = await setup();
-  const css = document.querySelector('#tubekit-styles').textContent;
-  expect(css).toMatch(/ytd-watch-flexy:not\(\[is-two-columns_\]\) #tubekit-root\s*\{[^}]*display: none !important;/);
-  expect(css).not.toMatch(/max-width: 1014px/);
+  const root = document.querySelector('#tubekit-root');
+  stubProperty(document, 'fullscreenElement', { get: () => document.documentElement });
+  document.querySelector('#comments').appendChild(document.createElement('ytd-comment-thread-renderer'));
+  await mutationsSettle();
+  expect(root.dataset.suspended).toBe('false');
+  document.querySelector('#below').appendChild(document.createElement('div'));
+  await mutationsSettle();
+  expect(root.dataset.suspended).toBe('true');
+});
+
+test('the immediate decision measures neither the YouTube panel nor the watch page, the maintenance pass measures the panel', async () => {
+  const { document, watch } = await setup();
+  const chat = document.createElement('ytd-live-chat-frame');
+  const measured = vi.fn(() => [{}]);
+  chat.getClientRects = measured;
+  document.querySelector('#secondary-inner').append(chat);
+  await advance(300);
+  expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
+  measured.mockClear();
+  const watchMeasured = vi.fn(() => [{}]);
+  watch.getClientRects = watchMeasured;
+  document.querySelector('#below').appendChild(document.createElement('div'));
+  await mutationsSettle();
+  expect(measured).not.toHaveBeenCalled();
+  expect(watchMeasured).not.toHaveBeenCalled();
+  await advance(300);
+  expect(measured).toHaveBeenCalled();
 });
 
 test('idle DOM settles instead of repeatedly evaluating', async () => {
@@ -278,7 +417,7 @@ test('booting off the watch page ignores DOM changes, then builds the panel on /
     url: 'https://www.youtube.com/',
     html: '<html lang="en"><head></head><body></body></html>',
     innerWidth: 1440,
-    ...columnRects({ width: 900, left: 0, right: 900 }, { width: 400, left: 920, right: 1320 }),
+    ...shownRects(),
   });
   await startFeature('right-rail-comments');
   await advance(400);
@@ -635,10 +774,9 @@ test('panes do not contain fixed-position menus such as the comment sort dropdow
 
 test('secondary column offsets its top with margin, not padding, so a short left column still keeps it level with the player', async () => {
   const { document } = await setup();
-  const css = document.getElementById('tubekit-styles').textContent;
-  const rule = css.match(/ytd-watch-flexy #secondary \{([^}]*)\}/)[1];
-  expect(rule).toMatch(/margin-top: 12px !important;/);
-  expect(rule).toMatch(/padding-top: 0 !important;/);
+  const style = getComputedStyle(document.querySelector('#secondary'));
+  expect(style.marginTop).toBe('12px');
+  expect(style.paddingTop).toBe('0px');
 });
 
 function spyScrollTop(pane) {
@@ -842,6 +980,46 @@ test('fullscreen holds the panel and restores the tab and both scroll positions 
   expect(document.querySelector('#tubekit-root'), 'not torn down').toBe(root);
   expect(root.dataset.suspended).toBe('false');
   expect(document.documentElement.classList.contains('tubekit-suspended')).toBe(false);
+  expect(selected(document)).toBe('comments');
+  expect(panes.comments.value).toBe(300);
+  document.querySelector('[role="tab"][data-tab="related"]').click();
+  await frames();
+  expect(panes.related.value).toBe(700);
+});
+
+test('fullscreen ending while a YouTube panel is open keeps the panel held and the saved scroll positions, even when the attribute leaves first', async () => {
+  const { document, watch } = await setup();
+  const root = document.querySelector('#tubekit-root');
+  const panes = await scrollBothTabs();
+  const panel = expandedPanel(document);
+  document.querySelector('#secondary-inner').append(panel);
+  await advance(16);
+  expect(root.dataset.suspended).toBe('true');
+  Object.values(panes).forEach(pane => { pane.hidden = true; });
+  let element = null;
+  stubProperty(document, 'fullscreenElement', { get: () => element });
+  const fullscreenChange = () => document.documentElement.dispatchEvent(new Event('fullscreenchange', { bubbles: true }));
+  element = document.documentElement;
+  for (const name of ['fullscreen', 'full-bleed-player']) watch.setAttribute(name, '');
+  layout.hidden = true;
+  fullscreenChange();
+  await advance(200);
+  expect(root.dataset.suspended).toBe('true');
+  element = null;
+  for (const name of ['fullscreen', 'full-bleed-player']) watch.removeAttribute(name);
+  layout.hidden = false;
+  await mutationsSettle();
+  expect(root.dataset.suspended, 'not revealed when the attribute leaves').toBe('true');
+  fullscreenChange();
+  await advance(200);
+  await frames();
+  expect(document.querySelector('#tubekit-root')).toBe(root);
+  expect(root.dataset.suspended, 'still held after the maintenance pass').toBe('true');
+  panel.remove();
+  await advance(16);
+  expect(root.dataset.suspended).toBe('false');
+  Object.values(panes).forEach(pane => { pane.hidden = false; });
+  await frames();
   expect(selected(document)).toBe('comments');
   expect(panes.comments.value).toBe(300);
   document.querySelector('[role="tab"][data-tab="related"]').click();
