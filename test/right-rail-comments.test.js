@@ -180,7 +180,7 @@ test('the app observer watches every attribute the two-column screen and the pag
   await startFeature('right-rail-comments');
   document.body.append(document.createElement('div'));
   await advance(200);
-  for (const name of ['is-two-columns_', 'theater', 'fullscreen', 'video-id']) expect(filters, name).toContain(name);
+  for (const name of ['is-two-columns_', 'theater', 'fullscreen', 'video-id', 'hidden']) expect(filters, name).toContain(name);
 });
 
 test('the theater attribute takes the panel down and returns the related list at once, without advancing timers', async () => {
@@ -228,12 +228,16 @@ test('the fullscreen attribute holds the panel at once, and removing it shows th
   expect(root.dataset.suspended).toBe('false');
 });
 
-test('a change in the watch video-id takes the old panel down at once', async () => {
+test('the watch video-id reaching the new address video swaps the old panel for a fresh one at once', async () => {
   const { document, watch } = await setup();
+  const root = document.querySelector('#tubekit-root');
   history.pushState({}, '', '/watch?v=B');
   watch.setAttribute('video-id', 'B');
   await mutationsSettle();
-  expect(document.querySelector('#tubekit-root')).toBe(null);
+  const fresh = document.querySelector('#tubekit-root');
+  expect(fresh).toBeTruthy();
+  expect(fresh).not.toBe(root);
+  expect(root.isConnected).toBe(false);
 });
 
 test('the immediate decision still waits for a related list, then stands the panel up on the next change', async () => {
@@ -335,22 +339,37 @@ test('native reparenting of the existing comments is repaired', async () => {
   expect(document.querySelectorAll('#comments').length).toBe(1);
 });
 
-test('old video content is not restored into a reused watch renderer', async () => {
+test('the comments element YouTube reuses for the next video passes to the new panel once the page shows that video', async () => {
   const { document, watch } = await setup();
-  const oldComments = document.querySelector('#comments');
+  const reused = document.querySelector('#comments');
   history.pushState({}, '', '/watch?v=B');
+  await advance(100);
+  reused.replaceChildren();
+  await advance(100);
+  expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(reused);
   watch.setAttribute('video-id', 'B');
-  await advance(200);
-  expect(oldComments.isConnected).toBe(false);
+  await mutationsSettle();
+  const pane = document.querySelector('#tubekit-comments-pane');
+  expect(pane.querySelector('#comments')).toBe(reused);
   expect(document.querySelector('#primary #comments')).toBe(null);
+  expect(document.querySelectorAll('#comments').length).toBe(1);
+  expect(pane.querySelector('.tubekit-status').dataset.kind).toBe('loading');
+  reused.append(document.createElement('ytd-comments-header-renderer'));
+  await advance(600);
+  expect(document.querySelector('.tubekit-status')).toBe(null);
+  await advance(30_000);
+  expect(document.querySelector('.tubekit-status')).toBe(null);
+  expect(pane.querySelector('#comments')).toBe(reused);
+  expect(selected(document)).toBe('comments');
 });
+
 
 test('unavailable timer from the previous video cannot switch the new tab', async () => {
   const { document, watch } = await setup({ disabled: true });
   document.dispatchEvent(new Event('yt-navigate-start'));
   history.pushState({}, '', '/watch?v=B');
   watch.setAttribute('video-id', 'B');
-  document.querySelector('#comments').replaceWith(newComments(document));
+  document.querySelector('#below').append(newComments(document));
   document.dispatchEvent(new Event('yt-navigate-finish'));
   await advance(1000);
   expect(selected(document)).toBe('comments');
@@ -396,9 +415,10 @@ test('comments that fail to load show an error with a retry button that switches
 });
 
 test('DOM changes off the watch page skip evaluation, and returning to /watch restores the panel', async () => {
-  const { document } = await setup();
+  const { document, watch } = await setup();
   document.dispatchEvent(new Event('yt-navigate-start'));
   history.pushState({}, '', '/');
+  watch.setAttribute('hidden', '');
   await advance(400);
   expect(document.querySelector('#tubekit-root')).toBe(null);
   expect(vi.getTimerCount()).toBe(0);
@@ -407,6 +427,7 @@ test('DOM changes off the watch page skip evaluation, and returning to /watch re
   expect(vi.getTimerCount()).toBe(0);
   await advance(400);
   history.pushState({}, '', '/watch?v=A');
+  watch.removeAttribute('hidden');
   document.dispatchEvent(new Event('yt-navigate-finish'));
   await advance(500);
   expect(document.querySelector('#tubekit-root')).toBeTruthy();
@@ -1094,6 +1115,344 @@ test('fullscreen ending outside the two-column layout tears the panel down', asy
   expect(document.documentElement.classList.contains('tubekit-suspended')).toBe(false);
 });
 
+describe('moving to another video', () => {
+  const moveAddress = (videoId) => {
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', `/watch?v=${videoId}`);
+  };
+
+  const pageMoves = (watch, videoId) => watch.setAttribute('video-id', videoId);
+
+  async function setupOnRelated() {
+    const page = await setup();
+    const panes = await scrollBothTabs();
+    document.querySelector('#tubekit-related-tab').click();
+    await frames();
+    return { ...page, panes, root: document.querySelector('#tubekit-root'), related: document.querySelector('#related') };
+  }
+
+  function expectPanelUntouched({ root, related, panes }) {
+    expect(document.querySelector('#tubekit-root')).toBe(root);
+    expect(related.parentNode).toBe(document.querySelector('#tubekit-related-pane'));
+    expect(document.querySelector('#secondary-inner > #related')).toBe(null);
+    expect(document.querySelector('#primary #comments')).toBe(null);
+    expect(root.dataset.suspended).toBe('false');
+    expect(selected(document)).toBe('related');
+    expect(panes.related.value).toBe(700);
+    expect(document.querySelector('.tubekit-status')).toBe(null);
+  }
+
+  test('the panel stays as it is while the address names a new video and the page still shows the old one', async () => {
+    const { document, watch, ...page } = await setupOnRelated();
+    moveAddress('B');
+    await advance(500);
+    expectPanelUntouched(page);
+    document.querySelector('#below').append(document.createElement('div'));
+    window.dispatchEvent(new Event('resize'));
+    await advance(60_000);
+    expectPanelUntouched(page);
+    expect(watch.getAttribute('video-id')).toBe('A');
+    document.querySelector('#tubekit-comments-tab').click();
+    expect(selected(document)).toBe('comments');
+  });
+
+  test('the page reaching the new video swaps the panel in the same step and opens the comments tab', async () => {
+    const { document, watch, root, related, panes } = await setupOnRelated();
+    moveAddress('B');
+    await advance(500);
+    expect(panes.related.value).toBe(700);
+    pageMoves(watch, 'B');
+    await mutationsSettle();
+    const fresh = document.querySelector('#tubekit-root');
+    expect(fresh).toBeTruthy();
+    expect(fresh).not.toBe(root);
+    expect(document.querySelectorAll('#tubekit-root').length).toBe(1);
+    expect(selected(document)).toBe('comments');
+    expect(fresh.dataset.suspended).toBe('false');
+    expect(document.querySelector('#tubekit-related-pane #related')).toBe(related);
+    expect(document.querySelector('#secondary-inner > #related')).toBe(null);
+    const arriving = newComments(document);
+    document.querySelector('#below').append(arriving);
+    await advance(500);
+    expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(arriving);
+    expect(document.querySelector('.tubekit-status')).toBe(null);
+  });
+
+  test('going back to the old video after the page moved on shows a fresh panel on the comments tab', async () => {
+    const { document, watch } = await setupOnRelated();
+    moveAddress('B');
+    pageMoves(watch, 'B');
+    await advance(300);
+    document.querySelector('#tubekit-related-tab').click();
+    history.pushState({}, '', '/watch?v=A');
+    pageMoves(watch, 'A');
+    await mutationsSettle();
+    expect(selected(document)).toBe('comments');
+  });
+
+  test('a navigation that ends on the same video keeps the tab and the scroll position', async () => {
+    const page = await setupOnRelated();
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    await advance(500);
+    expectPanelUntouched(page);
+    moveAddress('A');
+    await advance(500);
+    expectPanelUntouched(page);
+    moveAddress('B');
+    await advance(500);
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/watch?v=A');
+    window.dispatchEvent(new Event('popstate'));
+    await advance(500);
+    expectPanelUntouched(page);
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+    await advance(500);
+    expectPanelUntouched(page);
+  });
+
+  test('leaving the two-column layout while the page lags behind takes the panel down and gives the lists back', async () => {
+    const { document } = await setup();
+    const comments = document.querySelector('#comments');
+    const related = document.querySelector('#related');
+    moveAddress('B');
+    await advance(300);
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+    collapseToOneColumn();
+    await advance(300);
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    expect(document.querySelector('#secondary-inner > #related')).toBe(related);
+    expect(document.querySelector('#below > #comments')).toBe(comments);
+    expect(document.documentElement.classList.contains('tubekit-active')).toBe(false);
+  });
+
+  test.each([
+    ['the home page', '/'],
+    ['the search results', '/results?search_query=news'],
+  ])('leaving for %s keeps the panel until the watch page is hidden, then gives the lists back', async (_name, address) => {
+    const { document, watch } = await setup();
+    const root = document.querySelector('#tubekit-root');
+    const related = document.querySelector('#related');
+    const comments = document.querySelector('#comments');
+    document.querySelector('#tubekit-related-tab').click();
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', address);
+    await advance(5000);
+    expect(document.querySelector('#tubekit-root')).toBe(root);
+    expect(related.parentNode).toBe(document.querySelector('#tubekit-related-pane'));
+    expect(document.querySelector('#secondary-inner > #related')).toBe(null);
+    expect(selected(document)).toBe('related');
+    expect(root.dataset.suspended).toBe('false');
+    watch.setAttribute('hidden', '');
+    await mutationsSettle();
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    expect(document.querySelector('#secondary-inner > #related')).toBe(related);
+    expect(document.querySelector('#below > #comments')).toBe(comments);
+    expect(document.documentElement.classList.contains('tubekit-active')).toBe(false);
+  });
+
+  test('changes to other hidden elements while leaving the watch page do not take the panel down', async () => {
+    const { document } = await setup();
+    const root = document.querySelector('#tubekit-root');
+    history.pushState({}, '', '/');
+    const other = document.createElement('div');
+    document.querySelector('#below').append(other);
+    other.setAttribute('hidden', '');
+    await advance(300);
+    expect(document.querySelector('#tubekit-root')).toBe(root);
+  });
+
+  test('coming back to the same video after another screen starts the panel fresh on the comments tab', async () => {
+    const { document, watch } = await setup();
+    document.querySelector('#tubekit-related-tab').click();
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/');
+    watch.setAttribute('hidden', '');
+    await advance(300);
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    history.pushState({}, '', '/watch?v=A');
+    watch.removeAttribute('hidden');
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+    await advance(500);
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+    expect(selected(document)).toBe('comments');
+  });
+
+  test('going back to the same video before the other screen is drawn keeps the panel and its tab', async () => {
+    const { document } = await setup();
+    const root = document.querySelector('#tubekit-root');
+    document.querySelector('#tubekit-related-tab').click();
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/');
+    await advance(500);
+    history.pushState({}, '', '/watch?v=A');
+    window.dispatchEvent(new Event('popstate'));
+    await advance(500);
+    expect(document.querySelector('#tubekit-root')).toBe(root);
+    expect(selected(document)).toBe('related');
+  });
+
+  test('leaving the two-column layout on another screen takes the panel down', async () => {
+    const { document } = await setup();
+    history.pushState({}, '', '/');
+    await advance(300);
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+    collapseToOneColumn();
+    await advance(300);
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+  });
+
+  test('fullscreen during the lag holds the panel, and the page reaching the new video then releases it', async () => {
+    const { document, watch } = await setup();
+    const root = document.querySelector('#tubekit-root');
+    const fullscreen = fullscreenStub();
+    moveAddress('B');
+    await advance(300);
+    fullscreen.enter();
+    await advance(200);
+    expect(document.querySelector('#tubekit-root')).toBe(root);
+    expect(root.dataset.suspended).toBe('true');
+    pageMoves(watch, 'B');
+    await advance(200);
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+  });
+
+  test('YouTube emptying or replacing the comments during the lag raises no notice, switches no tab and shows no error', async () => {
+    const { document } = await setup();
+    const toast = document.querySelector('#tubekit-toast');
+    moveAddress('B');
+    document.querySelector('#comments').innerHTML = '';
+    await advance(30_000);
+    document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
+    await advance(30_000);
+    document.querySelector('#comments').innerHTML = '';
+    document.querySelector('#comments').setAttribute('hidden', '');
+    document.querySelector('#secondary-inner').prepend(document.createElement('ytd-live-chat-frame'));
+    await advance(30_000);
+    expect(toast.dataset.visible).not.toBe('true');
+    expect(toast.textContent).toBe('');
+    expect(selected(document)).toBe('comments');
+    expect(document.querySelector('.tubekit-status')).toBe(null);
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+  });
+
+  test('YouTube taking the comments away during the lag shows no error however long the lag lasts', async () => {
+    const { document, watch } = await setup();
+    moveAddress('B');
+    document.querySelector('#comments').remove();
+    await advance(60_000);
+    expect(selected(document)).toBe('comments');
+    expect(document.querySelector('#tubekit-toast').textContent).toBe('');
+    expect(document.querySelector('.tubekit-status')).toBe(null);
+    pageMoves(watch, 'B');
+    await mutationsSettle();
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+    expect(selected(document)).toBe('comments');
+  });
+
+  test('comments YouTube puts in place of the old ones during the lag are taken without a loading box', async () => {
+    const { document } = await setup();
+    const old = document.querySelector('#comments');
+    moveAddress('B');
+    old.remove();
+    const replacement = newComments(document);
+    replacement.replaceChildren();
+    document.querySelector('#below').append(replacement);
+    await advance(30_000);
+    expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(replacement);
+    expect(document.querySelector('#primary #comments')).toBe(null);
+    expect(document.querySelector('.tubekit-status')).toBe(null);
+    expect(document.querySelector('#tubekit-toast').textContent).toBe('');
+  });
+
+  test('the page video-id being emptied for a moment keeps the panel, and the new video then swaps it', async () => {
+    const { document, watch } = await setup();
+    const root = document.querySelector('#tubekit-root');
+    const related = document.querySelector('#related');
+    moveAddress('B');
+    watch.setAttribute('video-id', '');
+    await advance(500);
+    expect(document.querySelector('#tubekit-root')).toBe(root);
+    expect(related.parentNode).toBe(document.querySelector('#tubekit-related-pane'));
+    pageMoves(watch, 'B');
+    await mutationsSettle();
+    const fresh = document.querySelector('#tubekit-root');
+    expect(fresh).not.toBe(root);
+    expect(document.querySelector('#tubekit-related-pane #related')).toBe(related);
+  });
+
+  test('fullscreen held while leaving the watch page releases once the watch page is hidden', async () => {
+    const { document, watch } = await setup();
+    const related = document.querySelector('#related');
+    const fullscreen = fullscreenStub();
+    fullscreen.enter();
+    await advance(200);
+    expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    history.pushState({}, '', '/?v=A');
+    await advance(500);
+    expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
+    watch.setAttribute('hidden', '');
+    await mutationsSettle();
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    expect(document.documentElement.classList.contains('tubekit-suspended')).toBe(false);
+    expect(document.documentElement.classList.contains('tubekit-active')).toBe(false);
+    expect(document.querySelector('#secondary-inner > #related')).toBe(related);
+  });
+
+  test('the switch to related for comments turned off waits for the address to name the video again', async () => {
+    const { document } = await setup({ disabled: true });
+    await advance(100);
+    moveAddress('B');
+    await advance(1500);
+    expect(selected(document)).toBe('comments');
+    history.pushState({}, '', '/watch?v=A');
+    window.dispatchEvent(new Event('popstate'));
+    await advance(300);
+    expect(selected(document)).toBe('related');
+  });
+
+  test('comments emptied during a lag that ends on the same video are judged again from what YouTube shows', async () => {
+    const { document } = await setup();
+    moveAddress('B');
+    document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
+    await advance(2000);
+    expect(document.querySelector('#tubekit-toast').dataset.visible).not.toBe('true');
+    history.pushState({}, '', '/watch?v=A');
+    window.dispatchEvent(new Event('urlchange'));
+    await advance(2000);
+    expect(document.querySelector('#tubekit-toast').dataset.visible).toBe('true');
+    expect(selected(document)).toBe('related');
+  });
+
+  test('the tab remembered on the old video is forgotten once another video was shown in between', async () => {
+    const { document, watch } = await setup();
+    document.querySelector('#tubekit-related-tab').click();
+    await theater(watch);
+    expect(document.querySelector('#tubekit-root')).toBe(null);
+    moveAddress('B');
+    pageMoves(watch, 'B');
+    document.querySelector('#below').append(newComments(document));
+    await advance(300);
+    moveAddress('A');
+    pageMoves(watch, 'A');
+    document.querySelector('#below').append(newComments(document));
+    await advance(300);
+    await leaveTheater(watch);
+    expect(document.querySelector('#tubekit-root')).toBeTruthy();
+    expect(selected(document)).toBe('comments');
+  });
+
+  test('the tab remembered on the old video is resumed when the navigation only started and the same video stays', async () => {
+    const { document, watch } = await setup();
+    document.querySelector('#tubekit-related-tab').click();
+    await theater(watch);
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    await advance(300);
+    await leaveTheater(watch);
+    expect(selected(document)).toBe('related');
+  });
+});
+
 test('theater mode tears the panel down instead of holding it, although YouTube sets full-bleed-player there as in fullscreen', async () => {
   const { document, watch } = await setup();
   await theater(watch);
@@ -1106,17 +1465,20 @@ describe('lifecycle rules', () => {
   const shown = (rememberedTab = null) => ({ phase: 'shown', rememberedTab });
   const held = (rememberedTab = null) => ({ phase: 'held', rememberedTab });
   const idle = {
-    navigating: false,
     videoId: 'A',
     twoColumn: false,
+    pageFollowsUrl: false,
     fullscreen: false,
     youtubePanel: false,
+    leaving: false,
+    gone: false,
     wrongGeneration: false,
     brokenRoot: false,
     currentTab: null,
   };
   const offScreen = facts => ({ ...idle, ...facts });
-  const onScreen = facts => ({ ...idle, twoColumn: true, currentTab: onA, ...facts });
+  const onScreen = facts => ({ ...idle, twoColumn: true, pageFollowsUrl: true, currentTab: onA, ...facts });
+  const pageBehind = facts => onScreen({ videoId: 'B', pageFollowsUrl: false, ...facts });
   const inFullscreen = facts => ({ ...idle, fullscreen: true, currentTab: onA, ...facts });
   const names = effects => effects.map(effect => (effect.type === 'mount' ? `mount:${effect.tab}` : effect.type));
 
@@ -1133,9 +1495,20 @@ describe('lifecycle rules', () => {
     ['another video does not resume the remembered tab', released(onA), onScreen({ videoId: 'B', currentTab: null }), shown(), ['mount:comments']],
     ['seeing another video forgets the remembered tab', released(onA), offScreen({ videoId: 'B' }), released(), []],
     ['leaving the watch page forgets the remembered tab', released(onA), offScreen({ videoId: null }), released(), []],
-    ['navigation start releases and forgets the tab', shown(), onScreen({ navigating: true }), released(), ['teardown']],
-    ['navigation start forgets the tab of an already released panel', released(onA), offScreen({ navigating: true }), released(), []],
-    ['navigation start never shows the panel', released(), onScreen({ navigating: true, currentTab: null }), released(), []],
+    ['a new video in the address while the page still shows the old one keeps a shown panel', shown(), pageBehind(), shown(), []],
+    ['a new video in the address while the page still shows the old one keeps a held panel', held(), pageBehind({ youtubePanel: true }), held(), []],
+    ['the page showing the new video releases the old panel and shows the new one fresh on comments', shown(), onScreen({ videoId: 'B', wrongGeneration: true }), shown(), ['teardown', 'mount:comments']],
+    ['the page showing the new video does not resume the tab of the old video even from the remembered one', released(onA), onScreen({ videoId: 'B', currentTab: null }), shown(), ['mount:comments']],
+    ['the page not yet showing the new video never shows a released panel', released(), pageBehind({ currentTab: null }), released(), []],
+    ['the address going back to the shown video keeps the panel and its tab', shown(), onScreen(), shown(), []],
+    ['leaving the two-column layout while the page lags behind the address releases and forgets the tab', shown(), pageBehind({ twoColumn: false }), released(), ['teardown']],
+    ['the address leaving the watch page releases and forgets the tab', shown(), offScreen({ videoId: null, currentTab: onA }), released(), ['teardown']],
+    ['the address leaving the watch page keeps a shown panel while the watch page is still shown', shown(), offScreen({ videoId: null, leaving: true, currentTab: onA }), shown(), []],
+    ['the address leaving the watch page keeps a held panel while the watch page is still shown', held(), offScreen({ videoId: null, leaving: true, youtubePanel: true, currentTab: onA }), held(), []],
+    ['fullscreen held while the watch page is gone releases', held(), inFullscreen({ videoId: null, gone: true }), released(), ['teardown']],
+    ['the watch page being left behind never shows a released panel', released(), offScreen({ videoId: null, leaving: true }), released(), []],
+    ['fullscreen while the page lags behind the address holds the panel', shown(), pageBehind({ twoColumn: false, fullscreen: true }), held(), ['saveScroll', 'hide']],
+    ['a YouTube panel opening while the page lags behind the address holds the panel', shown(), pageBehind({ youtubePanel: true }), held(), ['saveScroll', 'hide']],
     ['fullscreen holds instead of releasing', shown(), inFullscreen(), held(), ['saveScroll', 'hide']],
 
     ['a YouTube panel holds a shown panel', shown(), onScreen({ youtubePanel: true }), held(), ['saveScroll', 'hide']],
@@ -1431,6 +1804,68 @@ describe('comments loader', () => {
     expect(states).toStrictEqual([]);
   });
 
+  test('a loader still waiting while the address names another video neither fails nor decides, and goes on when the address comes back', async () => {
+    const { loader, below, states } = startLoader();
+    history.pushState({}, '', '/watch?v=B');
+    await advance(60_000);
+    expect(loader.state).toBe('loading');
+    expect(states).toStrictEqual([]);
+    history.pushState({}, '', '/watch?v=A');
+    await advance(300);
+    below.append(nativeComments(HEADER));
+    await advance(600);
+    expect(states).toStrictEqual(['loaded']);
+  });
+
+  test('changes seen while the address names another video are judged once it names the video again', async () => {
+    const { loader, states } = startLoader({ content: HEADER });
+    expect(states).toStrictEqual(['loaded']);
+    history.pushState({}, '', '/watch?v=B');
+    comments().innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
+    await advance(1000);
+    expect(states).toStrictEqual(['loaded']);
+    history.pushState({}, '', '/watch?v=A');
+    loader.refresh();
+    expect(loader.state).toBe('off');
+  });
+
+  test('comments replaced while the address names another video are taken without a loading state and loaded again on return', async () => {
+    const { loader, below, states, region, commentsPane } = startLoader({ content: HEADER });
+    const old = comments();
+    history.pushState({}, '', '/watch?v=B');
+    old.remove();
+    const replacement = nativeComments();
+    below.append(replacement);
+    loader.refresh();
+    await advance(1000);
+    expect(states).toStrictEqual(['loaded']);
+    expect(region.node).toBe(replacement);
+    expect(commentsPane.contains(replacement)).toBe(true);
+    history.pushState({}, '', '/watch?v=A');
+    loader.refresh();
+    expect(states).toStrictEqual(['loaded', 'loading']);
+    replacement.insertAdjacentHTML('beforeend', HEADER);
+    await advance(600);
+    expect(states).toStrictEqual(['loaded', 'loading', 'loaded']);
+  });
+
+  test('comments that fill in while the address names another video are decided as soon as it names the video again, not failed later', async () => {
+    const { loader, below, states } = startLoader();
+    await advance(500);
+    below.append(nativeComments());
+    await advance(300);
+    history.pushState({}, '', '/watch?v=B');
+    comments().insertAdjacentHTML('beforeend', HEADER);
+    await advance(1000);
+    expect(states).toStrictEqual([]);
+    history.pushState({}, '', '/watch?v=A');
+    await advance(600);
+    expect(states).toStrictEqual(['loaded']);
+    await advance(30_000);
+    expect(states).toStrictEqual(['loaded']);
+    expect(loader.state).toBe('loaded');
+  });
+
   test('replaced comments load again from the start', async () => {
     const { loader, below, states, region } = startLoader({ content: HEADER });
     loader.refresh();
@@ -1577,6 +2012,16 @@ describe('borrowed regions', () => {
     region.restore(watch, restoreArguments('A'));
     expect(node.parentNode).toBe(commentsPane);
     expect(document.createTreeWalker(document, 128).nextNode()).toBe(null);
+  });
+
+  test('a node is restored when the page video-id is empty and the video asked for is none', () => {
+    const { watch, root, commentsPane, below } = borrowPage();
+    below.append(nativeComments());
+    const region = createCommentsRegion(commentsPane, root);
+    const node = region.take(watch);
+    watch.setAttribute('video-id', '');
+    region.restore(watch, restoreArguments(null));
+    expect(node.parentNode).toBe(below);
   });
 
   test('related moved elsewhere by YouTube stays there, but moved comments are pulled back', () => {

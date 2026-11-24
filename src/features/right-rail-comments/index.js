@@ -5,6 +5,7 @@ import { ACTIVE_CLASS, HELD, HELD_CLASS, RELEASED, initialLifecycle, mountFailed
 import { addStyles } from './styles.js';
 import {
   SCREEN_ATTRIBUTES,
+  WATCH_HIDDEN_ATTRIBUTE,
   YOUTUBE_PANEL_ATTRIBUTES,
   findApp,
   findNativeRelated,
@@ -15,9 +16,12 @@ import {
   isFullscreen,
   isPlayerArea,
   isTwoColumnScreen,
+  isTwoColumnScreenLeft,
+  isWatchHidden,
   isVideoPage,
   isYoutubePanelOpen,
   pageFollowsUrl,
+  pageVideoId,
   urlVideoId,
 } from '../../core/youtube.js';
 
@@ -37,6 +41,7 @@ const state = {
   relatedRegion: null,
   commentsLoader: null,
   unavailableTimer: 0,
+  switchDeferred: false,
   activeTab: 'comments',
   scrollTop: { comments: 0, related: 0 },
   lifecycle: initialLifecycle,
@@ -71,10 +76,6 @@ const labels = () => {
       };
 };
 
-function isEligible(watch) {
-  return isTwoColumnScreen(watch) && pageFollowsUrl(watch);
-}
-
 function isRootBroken(watch) {
   return !state.root.isConnected ||
     state.root.parentNode !== findSecondaryInner(watch) ||
@@ -82,13 +83,17 @@ function isRootBroken(watch) {
 }
 
 function isWrongGeneration(watch) {
-  return state.watch !== watch || state.videoId !== urlVideoId() || !pageFollowsUrl(watch);
+  const pageVideo = pageVideoId(watch);
+  return state.watch !== watch || (pageVideo !== null && pageVideo !== state.videoId);
 }
 
 function observe(measurePanel) {
   const watch = findWatch();
   const mounted = Boolean(state.root);
-  const twoColumn = isEligible(watch);
+  const twoColumn = isTwoColumnScreen(watch);
+  const leaving = mounted && isTwoColumnScreenLeft(watch);
+  const videoAddress = isVideoPage();
+  const gone = mounted && !videoAddress && isWatchHidden(watch);
   const fullscreen = isFullscreen(watch);
   const wrongGeneration = mounted && isWrongGeneration(watch);
   const brokenRoot = mounted && isRootBroken(watch);
@@ -103,9 +108,11 @@ function observe(measurePanel) {
   return {
     watch,
     observation: {
-      navigating: false,
-      videoId: urlVideoId(),
+      videoId: videoAddress ? urlVideoId() : null,
       twoColumn,
+      leaving,
+      gone,
+      pageFollowsUrl: pageFollowsUrl(watch),
       fullscreen,
       youtubePanel: state.youtubePanelOpen,
       wrongGeneration,
@@ -302,13 +309,22 @@ function showToast(message) {
 function showCommentsUnavailable() {
   setCommentsStatus(null);
   showToast(labels().unavailable);
-  state.unavailableTimer = window.setTimeout(() => {
-    if (state.commentsLoader?.state === OFF && state.videoId === urlVideoId()) switchTab('related');
-  }, 900);
+  state.unavailableTimer = window.setTimeout(switchToRelatedIfOff, 900);
+}
+
+function switchToRelatedIfOff() {
+  state.switchDeferred = false;
+  if (state.commentsLoader?.state !== OFF) return;
+  if (state.videoId !== urlVideoId()) {
+    state.switchDeferred = true;
+    return;
+  }
+  switchTab('related');
 }
 
 function reactToComments(commentsState) {
   clearTimeout(state.unavailableTimer);
+  state.switchDeferred = false;
   if (commentsState === LOADING) setCommentsStatus('loading');
   else if (commentsState === FAILED) setCommentsStatus('error');
   else if (commentsState === LOADED) setCommentsStatus(null);
@@ -398,6 +414,7 @@ function mount(watch, initialTab) {
 
 function teardown() {
   clearTimeout(state.unavailableTimer);
+  state.switchDeferred = false;
   clearTimeout(state.retryTimer);
   state.specialObserver?.disconnect();
   state.specialObserver = null;
@@ -407,8 +424,8 @@ function teardown() {
   const related = state.relatedRegion;
   const relatedBeforeComments = related?.node && related.node.nextElementSibling === comments?.node
     ? comments.node : null;
-  comments?.restore(state.watch, { videoId: state.videoId });
-  related?.restore(state.watch, { videoId: state.videoId, before: relatedBeforeComments });
+  comments?.restore(state.watch, { videoId: pageVideoId(state.watch) });
+  related?.restore(state.watch, { videoId: pageVideoId(state.watch), before: relatedBeforeComments });
   state.root?.remove();
   document.documentElement.classList.remove(ACTIVE_CLASS, HELD_CLASS);
 
@@ -449,6 +466,7 @@ function evaluate() {
   refreshLabels();
   advanceLifecycle();
   if (state.root) {
+    if (state.switchDeferred) switchToRelatedIfOff();
     state.commentsLoader.refresh();
     syncReplacedRelated();
     syncScrollbarInsets();
@@ -463,7 +481,13 @@ const isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent
 
 const isIdleOffWatch = () => !state.root && !isVideoPage();
 
-const onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
+const isOtherHiddenChange = (record) => (
+  record.type === 'attributes' && record.attributeName === WATCH_HIDDEN_ATTRIBUTE && record.target !== state.watch
+);
+
+const onlyIrrelevantChanges = (records) => records.every((record) => (
+  isIrrelevantTarget(record.target) || isOtherHiddenChange(record)
+));
 
 function onAppMutations(records) {
   if (isIdleOffWatch() || onlyIrrelevantChanges(records)) return;
@@ -492,15 +516,10 @@ function retargetObserver() {
   state.appObserver = new MutationObserver(onAppMutations);
   state.appObserver.observe(target, {
     attributes: true,
-    attributeFilter: SCREEN_ATTRIBUTES,
+    attributeFilter: [...SCREEN_ATTRIBUTES, WATCH_HIDDEN_ATTRIBUTE],
     childList: true,
     subtree: true,
   });
-}
-
-function onNavigateStart() {
-  advanceLifecycle({ navigating: true });
-  scheduleEvaluation(150);
 }
 
 function onFullscreenChange() {
@@ -527,7 +546,7 @@ function boot() {
   const controller = new AbortController();
   const { signal } = controller;
   const capture = { capture: true, signal };
-  document.addEventListener('yt-navigate-start', onNavigateStart, capture);
+  document.addEventListener('yt-navigate-start', () => scheduleEvaluation(150), capture);
   document.addEventListener('yt-navigate-finish', () => scheduleEvaluation(0), capture);
   document.addEventListener('yt-page-data-updated', () => scheduleEvaluation(0), capture);
   window.addEventListener('fullscreenchange', onFullscreenChange, capture);

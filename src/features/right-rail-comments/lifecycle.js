@@ -16,17 +16,12 @@ export const initialLifecycle = Object.freeze({ phase: RELEASED, rememberedTab: 
 const effect = (type, fields = {}) => ({ type, ...fields });
 
 function keepsPanel(observation) {
-  if (observation.wrongGeneration || observation.brokenRoot) return false;
-  return observation.fullscreen || observation.twoColumn;
+  if (observation.wrongGeneration || observation.brokenRoot || observation.gone) return false;
+  return observation.fullscreen || observation.twoColumn || observation.leaving;
 }
 
 export function step(state, observation) {
   const effects = [];
-
-  if (observation.navigating) {
-    if (state.phase !== RELEASED) effects.push(effect('teardown'));
-    return { state: { phase: RELEASED, rememberedTab: null }, effects };
-  }
 
   let { phase, rememberedTab } = state;
 
@@ -39,7 +34,7 @@ export function step(state, observation) {
   if (rememberedTab && rememberedTab.videoId !== observation.videoId) rememberedTab = null;
 
   if (phase === RELEASED) {
-    if (!observation.twoColumn) return { state: { phase, rememberedTab }, effects };
+    if (!observation.twoColumn || !observation.pageFollowsUrl) return { state: { phase, rememberedTab }, effects };
     effects.push(effect('mount', { tab: rememberedTab?.tab ?? 'comments' }));
     phase = SHOWN;
   }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.7.5
+// @version      0.7.6
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -41,6 +41,7 @@
 	var COMMENTS_LOADED_SELECTOR = "ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count";
 	var PAGE_VIDEO_ID_ATTRIBUTE = "video-id";
 	var FULLSCREEN_ATTRIBUTE = "fullscreen";
+	var WATCH_HIDDEN_ATTRIBUTE = "hidden";
 	var TWO_COLUMN_PRESENT = ["is-two-columns_"];
 	var TWO_COLUMN_ABSENT = ["theater", FULLSCREEN_ATTRIBUTE];
 	var TWO_COLUMN_SELECTOR = [
@@ -137,10 +138,12 @@
 			return true;
 		}
 	}
+	function pageVideoId(watch) {
+		return watch?.getAttribute(PAGE_VIDEO_ID_ATTRIBUTE) || null;
+	}
 	function pageFollowsUrl(watch) {
 		const videoId = urlVideoId();
-		const pageVideoId = watch?.getAttribute(PAGE_VIDEO_ID_ATTRIBUTE);
-		return Boolean(videoId && pageVideoId && videoId === pageVideoId);
+		return Boolean(videoId && videoId === pageVideoId(watch));
 	}
 	function findApp() {
 		return document.querySelector("ytd-app");
@@ -151,9 +154,18 @@
 	function isFullscreen(watch) {
 		return isBrowserFullscreen() || Boolean(watch?.hasAttribute(FULLSCREEN_ATTRIBUTE));
 	}
-	function isTwoColumnScreen(watch) {
-		if (!watch || !isVideoPage() || isBrowserFullscreen()) return false;
+	function hasTwoColumnMarks(watch) {
+		if (!watch || isBrowserFullscreen()) return false;
 		return TWO_COLUMN_PRESENT.every((name) => watch.hasAttribute(name)) && TWO_COLUMN_ABSENT.every((name) => !watch.hasAttribute(name));
+	}
+	function isTwoColumnScreen(watch) {
+		return isVideoPage() && hasTwoColumnMarks(watch);
+	}
+	function isWatchHidden(watch) {
+		return !watch || watch.hasAttribute("hidden");
+	}
+	function isTwoColumnScreenLeft(watch) {
+		return !isVideoPage() && hasTwoColumnMarks(watch) && !isWatchHidden(watch);
 	}
 	function findSecondaryInner(watch) {
 		return watch?.querySelector("#secondary-inner") || null;
@@ -356,7 +368,7 @@
 				const homeMarker = marker;
 				const homeParent = home;
 				forgetMemory();
-				if (!held || !watch?.isConnected || watch.getAttribute("video-id") !== videoId) {
+				if (!held || !watch?.isConnected || pageVideoId(watch) !== videoId) {
 					homeMarker?.remove();
 					return;
 				}
@@ -416,6 +428,8 @@
 		let findTimer = 0;
 		let checkTimer = 0;
 		let uploaderOff = false;
+		let paused = false;
+		let replacedAway = false;
 		const frames = new Set();
 		const isDecided = () => state === "loaded" || state === "off";
 		function emit(next) {
@@ -435,7 +449,12 @@
 		}
 		function check() {
 			const node = region.node;
-			if (disposed || !node || videoId !== urlVideoId()) return;
+			if (disposed || !node) return;
+			if (videoId !== urlVideoId()) {
+				paused = true;
+				return;
+			}
+			paused = false;
 			if (commentsOffCandidate(node, watch) === "uploader") {
 				if (!uploaderOff) {
 					uploaderOff = true;
@@ -467,6 +486,28 @@
 			});
 			check();
 		}
+		function stopWatching() {
+			observer?.disconnect();
+			window.clearTimeout(checkTimer);
+			checkTimer = 0;
+			window.clearTimeout(findTimer);
+		}
+		function reload() {
+			paused = false;
+			replacedAway = false;
+			stopWatching();
+			region.forget();
+			emit(LOADING);
+			wait();
+		}
+		function adoptWhileAway() {
+			paused = true;
+			replacedAway = true;
+			stopWatching();
+			region.forget();
+			if (region.take(watch)) observe();
+			else wait();
+		}
 		function adopt() {
 			if (disposed || !region.pane.isConnected) return true;
 			if (region.node) return isDecided();
@@ -482,6 +523,14 @@
 			window.clearTimeout(findTimer);
 			if (adopt() || isDecided()) return;
 			if (disposed || !region.pane.isConnected) return;
+			if (videoId !== urlVideoId()) {
+				findTimer = window.setTimeout(() => wait(), COMMENTS_CHECK_MS);
+				return;
+			}
+			if (paused) {
+				check();
+				if (isDecided()) return;
+			}
 			const elapsed = performance.now() - startedAt;
 			if (elapsed >= LIVE_COMMENTS_GRACE_MS && commentsOffCandidate(region.node, watch) === "live-look") {
 				settle("off");
@@ -515,14 +564,26 @@
 				wait();
 			},
 			refresh() {
-				if (disposed || !region.replaced(watch)) return;
-				observer?.disconnect();
-				window.clearTimeout(checkTimer);
-				checkTimer = 0;
-				window.clearTimeout(findTimer);
-				region.forget();
-				emit(LOADING);
-				wait();
+				if (disposed) return;
+				const away = videoId !== urlVideoId();
+				if (region.replaced(watch)) {
+					if (away) adoptWhileAway();
+					else reload();
+					return;
+				}
+				if (away || !paused) return;
+				if (!region.node) reload();
+				else if (replacedAway) {
+					paused = false;
+					replacedAway = false;
+					stopWatching();
+					emit(LOADING);
+					observe();
+					wait();
+				} else {
+					paused = false;
+					check();
+				}
 			},
 			dispose() {
 				disposed = true;
@@ -554,21 +615,11 @@
 		...fields
 	});
 	function keepsPanel(observation) {
-		if (observation.wrongGeneration || observation.brokenRoot) return false;
-		return observation.fullscreen || observation.twoColumn;
+		if (observation.wrongGeneration || observation.brokenRoot || observation.gone) return false;
+		return observation.fullscreen || observation.twoColumn || observation.leaving;
 	}
 	function step(state, observation) {
 		const effects = [];
-		if (observation.navigating) {
-			if (state.phase !== "released") effects.push(effect("teardown"));
-			return {
-				state: {
-					phase: RELEASED,
-					rememberedTab: null
-				},
-				effects
-			};
-		}
 		let { phase, rememberedTab } = state;
 		if (phase !== "released" && !keepsPanel(observation)) {
 			effects.push(effect("teardown"));
@@ -577,7 +628,7 @@
 		}
 		if (rememberedTab && rememberedTab.videoId !== observation.videoId) rememberedTab = null;
 		if (phase === "released") {
-			if (!observation.twoColumn) return {
+			if (!observation.twoColumn || !observation.pageFollowsUrl) return {
 				state: {
 					phase,
 					rememberedTab
@@ -849,6 +900,7 @@
 		relatedRegion: null,
 		commentsLoader: null,
 		unavailableTimer: 0,
+		switchDeferred: false,
 		activeTab: "comments",
 		scrollTop: {
 			comments: 0,
@@ -881,19 +933,20 @@
 			unavailable: "Comments are unavailable for this video. Showing related videos."
 		};
 	};
-	function isEligible(watch) {
-		return isTwoColumnScreen(watch) && pageFollowsUrl(watch);
-	}
 	function isRootBroken(watch) {
 		return !state.root.isConnected || state.root.parentNode !== findSecondaryInner(watch) || !state.root.contains(state.commentsPane) || !state.root.contains(state.relatedPane);
 	}
 	function isWrongGeneration(watch) {
-		return state.watch !== watch || state.videoId !== urlVideoId() || !pageFollowsUrl(watch);
+		const pageVideo = pageVideoId(watch);
+		return state.watch !== watch || pageVideo !== null && pageVideo !== state.videoId;
 	}
 	function observe(measurePanel) {
 		const watch = findWatch();
 		const mounted = Boolean(state.root);
-		const twoColumn = isEligible(watch);
+		const twoColumn = isTwoColumnScreen(watch);
+		const leaving = mounted && isTwoColumnScreenLeft(watch);
+		const videoAddress = isVideoPage();
+		const gone = mounted && !videoAddress && isWatchHidden(watch);
 		const fullscreen = isFullscreen(watch);
 		const wrongGeneration = mounted && isWrongGeneration(watch);
 		const brokenRoot = mounted && isRootBroken(watch);
@@ -903,9 +956,11 @@
 		return {
 			watch,
 			observation: {
-				navigating: false,
-				videoId: urlVideoId(),
+				videoId: videoAddress ? urlVideoId() : null,
 				twoColumn,
+				leaving,
+				gone,
+				pageFollowsUrl: pageFollowsUrl(watch),
 				fullscreen,
 				youtubePanel: state.youtubePanelOpen,
 				wrongGeneration,
@@ -1078,12 +1133,20 @@
 	function showCommentsUnavailable() {
 		setCommentsStatus(null);
 		showToast(labels().unavailable);
-		state.unavailableTimer = window.setTimeout(() => {
-			if (state.commentsLoader?.state === "off" && state.videoId === urlVideoId()) switchTab("related");
-		}, 900);
+		state.unavailableTimer = window.setTimeout(switchToRelatedIfOff, 900);
+	}
+	function switchToRelatedIfOff() {
+		state.switchDeferred = false;
+		if (state.commentsLoader?.state !== "off") return;
+		if (state.videoId !== urlVideoId()) {
+			state.switchDeferred = true;
+			return;
+		}
+		switchTab("related");
 	}
 	function reactToComments(commentsState) {
 		clearTimeout(state.unavailableTimer);
+		state.switchDeferred = false;
 		if (commentsState === "loading") setCommentsStatus("loading");
 		else if (commentsState === "failed") setCommentsStatus("error");
 		else if (commentsState === "loaded") setCommentsStatus(null);
@@ -1160,6 +1223,7 @@
 	}
 	function teardown() {
 		clearTimeout(state.unavailableTimer);
+		state.switchDeferred = false;
 		clearTimeout(state.retryTimer);
 		state.specialObserver?.disconnect();
 		state.specialObserver = null;
@@ -1167,9 +1231,9 @@
 		const comments = state.commentsRegion;
 		const related = state.relatedRegion;
 		const relatedBeforeComments = related?.node && related.node.nextElementSibling === comments?.node ? comments.node : null;
-		comments?.restore(state.watch, { videoId: state.videoId });
+		comments?.restore(state.watch, { videoId: pageVideoId(state.watch) });
 		related?.restore(state.watch, {
-			videoId: state.videoId,
+			videoId: pageVideoId(state.watch),
 			before: relatedBeforeComments
 		});
 		state.root?.remove();
@@ -1209,6 +1273,7 @@
 		refreshLabels();
 		advanceLifecycle();
 		if (state.root) {
+			if (state.switchDeferred) switchToRelatedIfOff();
 			state.commentsLoader.refresh();
 			syncReplacedRelated();
 			syncScrollbarInsets();
@@ -1219,7 +1284,8 @@
 	}
 	var isIrrelevantTarget = (node) => !node.isConnected || isInsideAdoptedContent(node) || isPlayerArea(node);
 	var isIdleOffWatch = () => !state.root && !isVideoPage();
-	var onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target));
+	var isOtherHiddenChange = (record) => record.type === "attributes" && record.attributeName === "hidden" && record.target !== state.watch;
+	var onlyIrrelevantChanges = (records) => records.every((record) => isIrrelevantTarget(record.target) || isOtherHiddenChange(record));
 	function onAppMutations(records) {
 		if (isIdleOffWatch() || onlyIrrelevantChanges(records)) return;
 		advanceLifecycle({}, { measurePanel: false });
@@ -1245,14 +1311,10 @@
 		state.appObserver = new MutationObserver(onAppMutations);
 		state.appObserver.observe(target, {
 			attributes: true,
-			attributeFilter: SCREEN_ATTRIBUTES,
+			attributeFilter: [...SCREEN_ATTRIBUTES, WATCH_HIDDEN_ATTRIBUTE],
 			childList: true,
 			subtree: true
 		});
-	}
-	function onNavigateStart() {
-		advanceLifecycle({ navigating: true });
-		scheduleEvaluation(150);
 	}
 	function onFullscreenChange() {
 		if (isBrowserFullscreen()) advanceLifecycle({ fullscreen: true });
@@ -1281,7 +1343,7 @@
 			capture: true,
 			signal
 		};
-		document.addEventListener("yt-navigate-start", onNavigateStart, capture);
+		document.addEventListener("yt-navigate-start", () => scheduleEvaluation(150), capture);
 		document.addEventListener("yt-navigate-finish", () => scheduleEvaluation(0), capture);
 		document.addEventListener("yt-page-data-updated", () => scheduleEvaluation(0), capture);
 		window.addEventListener("fullscreenchange", onFullscreenChange, capture);

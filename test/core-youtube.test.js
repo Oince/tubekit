@@ -24,10 +24,13 @@ import {
   isPlaying,
   isStopped,
   isTwoColumnScreen,
+  isTwoColumnScreenLeft,
   isVideoId,
   isVideoPage,
+  isWatchHidden,
   isYoutubePanelOpen,
   pageFollowsUrl,
+  pageVideoId,
   playerFollowsVideo,
   playerOfMediaEvent,
   setPlaybackQuality,
@@ -176,6 +179,19 @@ test('the page has caught up when the watch video-id matches the address', () =>
   history.replaceState(null, '', '/');
   watch.setAttribute('video-id', 'A');
   expect(pageFollowsUrl(watch)).toBe(false);
+});
+
+test('the page shows the video its watch video-id names, whatever the address says', () => {
+  playerPage();
+  const watch = document.querySelector('ytd-watch-flexy');
+  expect(pageVideoId(watch)).toBe('A');
+  history.replaceState(null, '', '/watch?v=B');
+  expect(pageVideoId(watch)).toBe('A');
+  watch.setAttribute('video-id', '');
+  expect(pageVideoId(watch)).toBe(null);
+  watch.removeAttribute('video-id');
+  expect(pageVideoId(watch)).toBe(null);
+  expect(pageVideoId(null)).toBe(null);
 });
 
 test('the watch holding the player wins; otherwise the first shown watch, otherwise the last one', () => {
@@ -327,6 +343,32 @@ test('the two-column screen needs a video page and is not the browser fullscreen
   expect(isTwoColumnScreen(watch)).toBe(true);
   stubProperty(document, 'fullscreenElement', { get: () => document.documentElement });
   expect(isTwoColumnScreen(watch)).toBe(false);
+});
+
+test('a two-column watch left for another address counts as left only while it is still shown', () => {
+  const watch = watchPage('is-two-columns_', 'https://www.youtube.com/');
+  expect(isTwoColumnScreen(watch)).toBe(false);
+  expect(isTwoColumnScreenLeft(watch)).toBe(true);
+  history.replaceState(null, '', '/results?search_query=news');
+  expect(isTwoColumnScreenLeft(watch)).toBe(true);
+  expect(isWatchHidden(watch)).toBe(false);
+  watch.setAttribute('hidden', '');
+  expect(isTwoColumnScreenLeft(watch)).toBe(false);
+  expect(isWatchHidden(watch)).toBe(true);
+  expect(isWatchHidden(null)).toBe(true);
+  watch.removeAttribute('hidden');
+  watch.setAttribute('theater', '');
+  expect(isTwoColumnScreenLeft(watch)).toBe(false);
+  watch.removeAttribute('theater');
+  watch.removeAttribute('is-two-columns_');
+  expect(isTwoColumnScreenLeft(watch)).toBe(false);
+  watch.setAttribute('is-two-columns_', '');
+  history.replaceState(null, '', '/watch?v=A');
+  expect(isTwoColumnScreenLeft(watch)).toBe(false);
+  history.replaceState(null, '', '/');
+  stubProperty(document, 'fullscreenElement', { get: () => document.documentElement });
+  expect(isTwoColumnScreenLeft(watch)).toBe(false);
+  expect(isTwoColumnScreenLeft(null)).toBe(false);
 });
 
 test('the app element is found by the adapter', () => {

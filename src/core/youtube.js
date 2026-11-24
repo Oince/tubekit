@@ -22,6 +22,7 @@ const COMMENTS_LOADED_SELECTOR = 'ytd-comments-header-renderer, ytd-comment-thre
 
 const PAGE_VIDEO_ID_ATTRIBUTE = 'video-id';
 const FULLSCREEN_ATTRIBUTE = 'fullscreen';
+export const WATCH_HIDDEN_ATTRIBUTE = 'hidden';
 const TWO_COLUMN_PRESENT = ['is-two-columns_'];
 const TWO_COLUMN_ABSENT = ['theater', FULLSCREEN_ATTRIBUTE];
 
@@ -133,10 +134,13 @@ export function playerFollowsVideo(player, videoId) {
   }
 }
 
+export function pageVideoId(watch) {
+  return watch?.getAttribute(PAGE_VIDEO_ID_ATTRIBUTE) || null;
+}
+
 export function pageFollowsUrl(watch) {
   const videoId = urlVideoId();
-  const pageVideoId = watch?.getAttribute(PAGE_VIDEO_ID_ATTRIBUTE);
-  return Boolean(videoId && pageVideoId && videoId === pageVideoId);
+  return Boolean(videoId && videoId === pageVideoId(watch));
 }
 
 export function findApp() {
@@ -151,10 +155,22 @@ export function isFullscreen(watch) {
   return isBrowserFullscreen() || Boolean(watch?.hasAttribute(FULLSCREEN_ATTRIBUTE));
 }
 
-export function isTwoColumnScreen(watch) {
-  if (!watch || !isVideoPage() || isBrowserFullscreen()) return false;
+function hasTwoColumnMarks(watch) {
+  if (!watch || isBrowserFullscreen()) return false;
   return TWO_COLUMN_PRESENT.every(name => watch.hasAttribute(name)) &&
     TWO_COLUMN_ABSENT.every(name => !watch.hasAttribute(name));
+}
+
+export function isTwoColumnScreen(watch) {
+  return isVideoPage() && hasTwoColumnMarks(watch);
+}
+
+export function isWatchHidden(watch) {
+  return !watch || watch.hasAttribute(WATCH_HIDDEN_ATTRIBUTE);
+}
+
+export function isTwoColumnScreenLeft(watch) {
+  return !isVideoPage() && hasTwoColumnMarks(watch) && !isWatchHidden(watch);
 }
 
 export function findSecondaryInner(watch) {

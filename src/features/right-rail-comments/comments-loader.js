@@ -22,6 +22,8 @@ export function createCommentsLoader({ region, watch, videoId, onChange }) {
   let findTimer = 0;
   let checkTimer = 0;
   let uploaderOff = false;
+  let paused = false;
+  let replacedAway = false;
   const frames = new Set();
 
   const isDecided = () => state === LOADED || state === OFF;
@@ -46,7 +48,12 @@ export function createCommentsLoader({ region, watch, videoId, onChange }) {
 
   function check() {
     const node = region.node;
-    if (disposed || !node || videoId !== urlVideoId()) return;
+    if (disposed || !node) return;
+    if (videoId !== urlVideoId()) {
+      paused = true;
+      return;
+    }
+    paused = false;
     if (commentsOffCandidate(node, watch) === COMMENTS_OFF_BY_UPLOADER) {
       if (!uploaderOff) {
         uploaderOff = true;
@@ -80,6 +87,31 @@ export function createCommentsLoader({ region, watch, videoId, onChange }) {
     check();
   }
 
+  function stopWatching() {
+    observer?.disconnect();
+    window.clearTimeout(checkTimer);
+    checkTimer = 0;
+    window.clearTimeout(findTimer);
+  }
+
+  function reload() {
+    paused = false;
+    replacedAway = false;
+    stopWatching();
+    region.forget();
+    emit(LOADING);
+    wait();
+  }
+
+  function adoptWhileAway() {
+    paused = true;
+    replacedAway = true;
+    stopWatching();
+    region.forget();
+    if (region.take(watch)) observe();
+    else wait();
+  }
+
   function adopt() {
     if (disposed || !region.pane.isConnected) return true;
     if (region.node) return isDecided();
@@ -96,6 +128,14 @@ export function createCommentsLoader({ region, watch, videoId, onChange }) {
     window.clearTimeout(findTimer);
     if (adopt() || isDecided()) return;
     if (disposed || !region.pane.isConnected) return;
+    if (videoId !== urlVideoId()) {
+      findTimer = window.setTimeout(() => wait(), COMMENTS_CHECK_MS);
+      return;
+    }
+    if (paused) {
+      check();
+      if (isDecided()) return;
+    }
 
     const elapsed = performance.now() - startedAt;
     if (elapsed >= LIVE_COMMENTS_GRACE_MS && commentsOffCandidate(region.node, watch) === COMMENTS_OFF_LIVE_LOOK) {
@@ -134,14 +174,27 @@ export function createCommentsLoader({ region, watch, videoId, onChange }) {
     },
 
     refresh() {
-      if (disposed || !region.replaced(watch)) return;
-      observer?.disconnect();
-      window.clearTimeout(checkTimer);
-      checkTimer = 0;
-      window.clearTimeout(findTimer);
-      region.forget();
-      emit(LOADING);
-      wait();
+      if (disposed) return;
+      const away = videoId !== urlVideoId();
+      if (region.replaced(watch)) {
+        if (away) adoptWhileAway();
+        else reload();
+        return;
+      }
+      if (away || !paused) return;
+      if (!region.node) {
+        reload();
+      } else if (replacedAway) {
+        paused = false;
+        replacedAway = false;
+        stopWatching();
+        emit(LOADING);
+        observe();
+        wait();
+      } else {
+        paused = false;
+        check();
+      }
     },
 
     dispose() {

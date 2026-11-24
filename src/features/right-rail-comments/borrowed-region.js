@@ -1,5 +1,5 @@
 import { SCRIPT_ID } from './constants.js';
-import { findCommentsHome, findNativeComments, findNativeRelated, findSecondaryInner } from '../../core/youtube.js';
+import { findCommentsHome, findNativeComments, findNativeRelated, findSecondaryInner, pageVideoId } from '../../core/youtube.js';
 
 export function createBorrowedRegion({ pane, root, find, markerName, fallbackHome, yieldsToYouTubeMoves = false }) {
   let node = null;
@@ -57,7 +57,7 @@ export function createBorrowedRegion({ pane, root, find, markerName, fallbackHom
       const homeParent = home;
       forgetMemory();
 
-      if (!held || !watch?.isConnected || watch.getAttribute('video-id') !== videoId) {
+      if (!held || !watch?.isConnected || pageVideoId(watch) !== videoId) {
         homeMarker?.remove();
         return;
       }
