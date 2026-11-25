@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.8.0
+// @version      0.8.1
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -224,6 +224,9 @@
 		if (!button) return false;
 		button.click();
 		return true;
+	}
+	function hideTouchesFromYoutube(element) {
+		element.addEventListener("touchend", (event) => event.stopPropagation());
 	}
 	function watchChatTitle(frame, onChange) {
 		let observer = null;
@@ -857,6 +860,7 @@
 			const tablist = document.createElement("div");
 			tablist.id = YOUTUBE_TABS_ID;
 			tablist.setAttribute("role", "tablist");
+			hideTouchesFromYoutube(tablist);
 			tablist.addEventListener("keydown", (event) => handleTabKeys(event, tablist, (button) => {
 				const panel = panels.find((entry) => tabButtons.get(entry.element) === button);
 				if (panel) select(panel);

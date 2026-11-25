@@ -5,6 +5,7 @@ import {
   closeYoutubePanel,
   findChatFrame,
   findSecondaryInner,
+  hideTouchesFromYoutube,
   panelOfRequest,
   watchChatTitle,
   youtubePanelTitle,
@@ -94,6 +95,7 @@ export function createYoutubePanels({ labels, onTitleChange }) {
     const tablist = document.createElement('div');
     tablist.id = YOUTUBE_TABS_ID;
     tablist.setAttribute('role', 'tablist');
+    hideTouchesFromYoutube(tablist);
     tablist.addEventListener('keydown', (event) => handleTabKeys(event, tablist, (button) => {
       const panel = panels.find((entry) => tabButtons.get(entry.element) === button);
       if (panel) select(panel);

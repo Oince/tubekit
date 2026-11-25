@@ -2391,6 +2391,36 @@ describe('YouTube panels fill the place of the held comments panel', () => {
     expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(false);
   });
 
+  test('close all still closes the panels when touched, although YouTube cancels clicks that miss the last touched element', async () => {
+    await setup();
+    let touched = null;
+    const remember = (event) => {
+      touched = event.composedPath()[0];
+    };
+    const cancel = (event) => {
+      if (touched && !event.composedPath().includes(touched)) event.stopPropagation();
+    };
+    document.addEventListener('touchend', remember);
+    document.addEventListener('click', cancel, true);
+    onCleanup(() => {
+      document.removeEventListener('touchend', remember);
+      document.removeEventListener('click', cancel, true);
+    });
+    const tap = (element) => {
+      element.dispatchEvent(new Event('touchend', { bubbles: true, composed: true }));
+      element.click();
+    };
+    const info = addEngagement({ title: 'Video info' });
+    addEngagement({ title: 'Ask' });
+    await settle();
+    tap(tabs()[1]);
+    await settle();
+    tap(row().querySelector('.tubekit-close-all'));
+    await settle();
+    expect(info.panel.getAttribute('visibility')).toBe(HIDDEN);
+    expect(row()).toBe(null);
+  });
+
   test('a single panel has no close all button', async () => {
     await setup();
     addEngagement({ title: 'Video info' });

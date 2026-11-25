@@ -253,6 +253,10 @@ export function closeYoutubePanel(panel) {
   return true;
 }
 
+export function hideTouchesFromYoutube(element) {
+  element.addEventListener('touchend', (event) => event.stopPropagation());
+}
+
 export function watchChatTitle(frame, onChange) {
   let observer = null;
   let observed = null;
