@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.8.1
+// @version      0.8.2
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -178,10 +178,8 @@
 	var ENGAGEMENT_KIND = "engagement";
 	var PANEL_REQUEST_ACTION = "yt-engagement-panel-visible-changed";
 	var PANEL_TITLE_SELECTOR = "ytd-engagement-panel-title-header-renderer [id=\"title-text\"]";
-	var PANEL_CLOSE_SELECTOR = "ytd-engagement-panel-title-header-renderer #visibility-button button";
 	var CHAT_HEADER_SELECTOR = "yt-live-chat-header-renderer";
 	var CHAT_TITLE_SELECTORS = ["#label-text", "#title"];
-	var CHAT_CLOSE_SELECTOR = `${CHAT_HEADER_SELECTOR} #close-button button`;
 	function isDisplayed(node) {
 		return node.getClientRects().length > 0;
 	}
@@ -218,15 +216,6 @@
 			return "";
 		}
 		return textOf(panel.element.querySelector(PANEL_TITLE_SELECTOR));
-	}
-	function closeYoutubePanel(panel) {
-		const button = panel.kind === "chat" ? chatDocument(panel.element)?.querySelector(CHAT_CLOSE_SELECTOR) : panel.element.querySelector(PANEL_CLOSE_SELECTOR);
-		if (!button) return false;
-		button.click();
-		return true;
-	}
-	function hideTouchesFromYoutube(element) {
-		element.addEventListener("touchend", (event) => event.stopPropagation());
 	}
 	function watchChatTitle(frame, onChange) {
 		let observer = null;
@@ -792,7 +781,6 @@
 	var PANEL_ATTRIBUTE = `data-${SCRIPT_ID}-panel`;
 	var YOUTUBE_TABS_ID = `${SCRIPT_ID}-youtube-tabs`;
 	var TAB_CLASS = `${SCRIPT_ID}-tab`;
-	var CLOSE_ALL_CLASS = `${SCRIPT_ID}-close-all`;
 	function handleTabKeys(event, tablist, select) {
 		const buttons = [...tablist.querySelectorAll("[role=\"tab\"]")];
 		const index = buttons.indexOf(document.activeElement);
@@ -814,7 +802,6 @@
 		let chatWatch = null;
 		let watchedFrame = null;
 		let tabButtons = new Map();
-		let closeAll = null;
 		let marked = new Set();
 		const titleOf = (panel) => youtubePanelTitle(panel) || (panel.kind === "chat" ? labels().chat : labels().panel);
 		function stopChatWatch() {
@@ -834,7 +821,6 @@
 			row?.remove();
 			row = null;
 			tabButtons = new Map();
-			closeAll = null;
 		}
 		function clearMarks() {
 			marked.forEach((node) => node.removeAttribute(PANEL_ATTRIBUTE));
@@ -860,7 +846,6 @@
 			const tablist = document.createElement("div");
 			tablist.id = YOUTUBE_TABS_ID;
 			tablist.setAttribute("role", "tablist");
-			hideTouchesFromYoutube(tablist);
 			tablist.addEventListener("keydown", (event) => handleTabKeys(event, tablist, (button) => {
 				const panel = panels.find((entry) => tabButtons.get(entry.element) === button);
 				if (panel) select(panel);
@@ -875,15 +860,6 @@
 			button.addEventListener("click", () => select(panel));
 			return button;
 		}
-		function buildCloseAll() {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = CLOSE_ALL_CLASS;
-			button.addEventListener("click", () => {
-				for (const panel of panels) closeYoutubePanel(panel);
-			});
-			return button;
-		}
 		function refreshRow() {
 			if (!row) return;
 			for (const panel of panels) {
@@ -896,19 +872,13 @@
 				button.setAttribute("aria-selected", String(selected));
 				button.tabIndex = selected ? 0 : -1;
 			}
-			const closeLabel = labels().closeAll;
-			if (closeAll.textContent !== closeLabel) closeAll.textContent = closeLabel;
 		}
 		function syncRow(inner) {
 			if (panels.length < 2) {
 				removeRow();
 				return;
 			}
-			if (!row) {
-				row = buildRow();
-				closeAll = buildCloseAll();
-				row.append(closeAll);
-			}
+			if (!row) row = buildRow();
 			for (const [element, button] of tabButtons) if (!panels.some((panel) => panel.element === element)) {
 				button.remove();
 				tabButtons.delete(element);
@@ -920,7 +890,7 @@
 					button = buildTab(panel);
 					tabButtons.set(panel.element, button);
 				}
-				if (button !== cursor) row.insertBefore(button, cursor || closeAll);
+				if (button !== cursor) row.insertBefore(button, cursor);
 				cursor = button.nextElementSibling;
 			}
 			if (row.parentNode !== inner || inner.firstElementChild !== row) inner.prepend(row);
@@ -1104,24 +1074,6 @@
 
     ${TABS_SELECTOR} .${SCRIPT_ID}-tab {
       flex: 1 1 0;
-    }
-
-    .${SCRIPT_ID}-close-all {
-      box-sizing: border-box;
-      flex: 0 0 auto;
-      height: 38px;
-      padding: 0 12px;
-      color: var(--${SCRIPT_ID}-text-secondary);
-      font: 500 14px/38px Roboto, Arial, sans-serif;
-      white-space: nowrap;
-      cursor: pointer;
-      background: transparent;
-      border: 0;
-      border-radius: 8px;
-    }
-
-    .${SCRIPT_ID}-close-all:hover {
-      background: var(--${SCRIPT_ID}-hover);
     }
 
     ${PANEL_CONTAINER_SELECTORS.map((container) => `${INNER_IN_FILL} > ${container}`).join(",\n    ")} {
@@ -1319,7 +1271,6 @@
 			loadFailed: "댓글을 불러오지 못했습니다.",
 			retry: "다시 시도",
 			unavailable: "이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다.",
-			closeAll: "모두 닫기",
 			chat: "채팅",
 			panel: "패널"
 		} : {
@@ -1329,7 +1280,6 @@
 			loadFailed: "Comments could not be loaded.",
 			retry: "Retry",
 			unavailable: "Comments are unavailable for this video. Showing related videos.",
-			closeAll: "Close all",
 			chat: "Chat",
 			panel: "Panel"
 		};

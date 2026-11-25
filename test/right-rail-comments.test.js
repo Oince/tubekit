@@ -2189,8 +2189,7 @@ describe('YouTube panels fill the place of the held comments panel', () => {
     expect(tabs().every(tab => tab.getAttribute('role') === 'tab')).toBe(true);
     expect(tabSelected()).toBe('Top chat replay');
     expect(marks()).toStrictEqual(['shown', 'hidden']);
-    expect(row().lastElementChild.className).toBe('tubekit-close-all');
-    expect(row().lastElementChild.textContent).toBe('Close all');
+    expect(row().children).toHaveLength(2);
   });
 
   test('panels already open when the hold starts begin on the front tab', async () => {
@@ -2369,29 +2368,9 @@ describe('YouTube panels fill the place of the held comments panel', () => {
     addChat('');
     await settle();
     expect(tabNames()).toStrictEqual(['채팅', '패널']);
-    expect(row().lastElementChild.textContent).toBe('모두 닫기');
   });
 
-  test('close all closes every open panel the way its own close button does, and the comments panel comes back', async () => {
-    await setup();
-    document.querySelector('[role="tab"][data-tab="related"]').click();
-    await settle();
-    const info = addEngagement({ title: 'Video info' });
-    const chat = addChat('Chat');
-    await settle();
-    expect(row()).toBeTruthy();
-    row().querySelector('.tubekit-close-all').click();
-    await settle();
-    expect(info.panel.getAttribute('visibility')).toBe(HIDDEN);
-    expect(chat.chat.hasAttribute('collapsed')).toBe(true);
-    expect(rootHeld()).toBe('false');
-    expect(row()).toBe(null);
-    expect(marks()).toStrictEqual([]);
-    expect(selected(document)).toBe('related');
-    expect(document.documentElement.classList.contains('tubekit-youtube-panels')).toBe(false);
-  });
-
-  test('close all still closes the panels when touched, although YouTube cancels clicks that miss the last touched element', async () => {
+  test('a tab touched right after touching a panel still switches, although YouTube cancels clicks that miss the last touched element', async () => {
     await setup();
     let touched = null;
     const remember = (event) => {
@@ -2411,24 +2390,17 @@ describe('YouTube panels fill the place of the held comments panel', () => {
       element.click();
     };
     const info = addEngagement({ title: 'Video info' });
-    addEngagement({ title: 'Ask' });
+    addChat('Chat');
     await settle();
-    tap(tabs()[1]);
+    clickTab('Video info');
     await settle();
-    tap(row().querySelector('.tubekit-close-all'));
+    tap(info.panel.querySelector('#title-text'));
+    tap(tabs()[0]);
     await settle();
-    expect(info.panel.getAttribute('visibility')).toBe(HIDDEN);
-    expect(row()).toBe(null);
+    expect(tabSelected()).toBe('Chat');
   });
 
-  test('a single panel has no close all button', async () => {
-    await setup();
-    addEngagement({ title: 'Video info' });
-    await settle();
-    expect(document.querySelector('.tubekit-close-all')).toBe(null);
-  });
-
-  test('arrow keys, Home and End move between the tabs like the comments panel tabs and not onto close all', async () => {
+  test('arrow keys, Home and End move between the tabs like the comments panel tabs', async () => {
     await setup();
     addEngagement({ title: 'One' });
     addEngagement({ title: 'Two' });

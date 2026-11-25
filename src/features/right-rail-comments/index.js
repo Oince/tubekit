@@ -70,7 +70,6 @@ const labels = () => {
         loadFailed: '댓글을 불러오지 못했습니다.',
         retry: '다시 시도',
         unavailable: '이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다.',
-        closeAll: '모두 닫기',
         chat: '채팅',
         panel: '패널',
       }
@@ -81,7 +80,6 @@ const labels = () => {
         loadFailed: 'Comments could not be loaded.',
         retry: 'Retry',
         unavailable: 'Comments are unavailable for this video. Showing related videos.',
-        closeAll: 'Close all',
         chat: 'Chat',
         panel: 'Panel',
       };

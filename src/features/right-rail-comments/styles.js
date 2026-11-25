@@ -151,24 +151,6 @@ export function addStyles() {
       flex: 1 1 0;
     }
 
-    .${SCRIPT_ID}-close-all {
-      box-sizing: border-box;
-      flex: 0 0 auto;
-      height: 38px;
-      padding: 0 12px;
-      color: var(--${SCRIPT_ID}-text-secondary);
-      font: 500 14px/38px Roboto, Arial, sans-serif;
-      white-space: nowrap;
-      cursor: pointer;
-      background: transparent;
-      border: 0;
-      border-radius: 8px;
-    }
-
-    .${SCRIPT_ID}-close-all:hover {
-      background: var(--${SCRIPT_ID}-hover);
-    }
-
     ${PANEL_CONTAINER_SELECTORS.map(container => `${INNER_IN_FILL} > ${container}`).join(',\n    ')} {
       display: flex !important;
       flex: 0 0 0 !important;

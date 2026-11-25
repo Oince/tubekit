@@ -186,10 +186,8 @@ export const CHAT_PANEL = 'chat';
 const ENGAGEMENT_KIND = 'engagement';
 const PANEL_REQUEST_ACTION = 'yt-engagement-panel-visible-changed';
 const PANEL_TITLE_SELECTOR = 'ytd-engagement-panel-title-header-renderer [id="title-text"]';
-const PANEL_CLOSE_SELECTOR = 'ytd-engagement-panel-title-header-renderer #visibility-button button';
 const CHAT_HEADER_SELECTOR = 'yt-live-chat-header-renderer';
 const CHAT_TITLE_SELECTORS = ['#label-text', '#title'];
-const CHAT_CLOSE_SELECTOR = `${CHAT_HEADER_SELECTOR} #close-button button`;
 
 function isDisplayed(node) {
   return node.getClientRects().length > 0;
@@ -242,19 +240,6 @@ export function youtubePanelTitle(panel) {
     return '';
   }
   return textOf(panel.element.querySelector(PANEL_TITLE_SELECTOR));
-}
-
-export function closeYoutubePanel(panel) {
-  const button = panel.kind === CHAT_PANEL
-    ? chatDocument(panel.element)?.querySelector(CHAT_CLOSE_SELECTOR)
-    : panel.element.querySelector(PANEL_CLOSE_SELECTOR);
-  if (!button) return false;
-  button.click();
-  return true;
-}
-
-export function hideTouchesFromYoutube(element) {
-  element.addEventListener('touchend', (event) => event.stopPropagation());
 }
 
 export function watchChatTitle(frame, onChange) {

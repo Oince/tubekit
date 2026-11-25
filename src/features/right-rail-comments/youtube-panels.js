@@ -2,10 +2,8 @@ import { SCRIPT_ID } from './constants.js';
 import { initialPanelSelection, nextPanelSelection } from './panel-selection.js';
 import {
   CHAT_PANEL,
-  closeYoutubePanel,
   findChatFrame,
   findSecondaryInner,
-  hideTouchesFromYoutube,
   panelOfRequest,
   watchChatTitle,
   youtubePanelTitle,
@@ -15,7 +13,6 @@ export const FILL_CLASS = `${SCRIPT_ID}-youtube-panels`;
 export const PANEL_ATTRIBUTE = `data-${SCRIPT_ID}-panel`;
 export const YOUTUBE_TABS_ID = `${SCRIPT_ID}-youtube-tabs`;
 const TAB_CLASS = `${SCRIPT_ID}-tab`;
-const CLOSE_ALL_CLASS = `${SCRIPT_ID}-close-all`;
 
 export function handleTabKeys(event, tablist, select) {
   const buttons = [...tablist.querySelectorAll('[role="tab"]')];
@@ -39,7 +36,6 @@ export function createYoutubePanels({ labels, onTitleChange }) {
   let chatWatch = null;
   let watchedFrame = null;
   let tabButtons = new Map();
-  let closeAll = null;
   let marked = new Set();
 
   const titleOf = (panel) => youtubePanelTitle(panel) || (panel.kind === CHAT_PANEL ? labels().chat : labels().panel);
@@ -63,7 +59,6 @@ export function createYoutubePanels({ labels, onTitleChange }) {
     row?.remove();
     row = null;
     tabButtons = new Map();
-    closeAll = null;
   }
 
   function clearMarks() {
@@ -95,7 +90,6 @@ export function createYoutubePanels({ labels, onTitleChange }) {
     const tablist = document.createElement('div');
     tablist.id = YOUTUBE_TABS_ID;
     tablist.setAttribute('role', 'tablist');
-    hideTouchesFromYoutube(tablist);
     tablist.addEventListener('keydown', (event) => handleTabKeys(event, tablist, (button) => {
       const panel = panels.find((entry) => tabButtons.get(entry.element) === button);
       if (panel) select(panel);
@@ -112,16 +106,6 @@ export function createYoutubePanels({ labels, onTitleChange }) {
     return button;
   }
 
-  function buildCloseAll() {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = CLOSE_ALL_CLASS;
-    button.addEventListener('click', () => {
-      for (const panel of panels) closeYoutubePanel(panel);
-    });
-    return button;
-  }
-
   function refreshRow() {
     if (!row) return;
     for (const panel of panels) {
@@ -134,8 +118,6 @@ export function createYoutubePanels({ labels, onTitleChange }) {
       button.setAttribute('aria-selected', String(selected));
       button.tabIndex = selected ? 0 : -1;
     }
-    const closeLabel = labels().closeAll;
-    if (closeAll.textContent !== closeLabel) closeAll.textContent = closeLabel;
   }
 
   function syncRow(inner) {
@@ -143,11 +125,7 @@ export function createYoutubePanels({ labels, onTitleChange }) {
       removeRow();
       return;
     }
-    if (!row) {
-      row = buildRow();
-      closeAll = buildCloseAll();
-      row.append(closeAll);
-    }
+    if (!row) row = buildRow();
     for (const [element, button] of tabButtons) {
       if (!panels.some((panel) => panel.element === element)) {
         button.remove();
@@ -161,7 +139,7 @@ export function createYoutubePanels({ labels, onTitleChange }) {
         button = buildTab(panel);
         tabButtons.set(panel.element, button);
       }
-      if (button !== cursor) row.insertBefore(button, cursor || closeAll);
+      if (button !== cursor) row.insertBefore(button, cursor);
       cursor = button.nextElementSibling;
     }
     if (row.parentNode !== inner || inner.firstElementChild !== row) inner.prepend(row);

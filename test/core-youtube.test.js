@@ -8,7 +8,6 @@ import {
   TWO_COLUMN_SELECTOR,
   YOUTUBE_PANEL_ATTRIBUTES,
   availableQualities,
-  closeYoutubePanel,
   commentsHaveLoaded,
   commentsOffCandidate,
   currentVideoId,
@@ -513,24 +512,6 @@ test('a chat is titled by the header inside its frame, falling back to the plain
   expect(youtubePanelTitle(panel)).toBe('');
   stubProperty(chat.querySelector('iframe'), 'contentDocument', { get: () => { throw new Error('cross-origin'); } });
   expect(youtubePanelTitle(panel)).toBe('');
-});
-
-test('closing a YouTube panel presses its own close button and reports whether there was one', () => {
-  const watch = panelPage(engagement('Video info', null) + '<ytd-engagement-panel-section-list-renderer visibility="' + EXPANDED + '"></ytd-engagement-panel-section-list-renderer>');
-  const [info, bare] = findYoutubePanels(watch);
-  const clicked = vi.fn();
-  info.element.querySelector('button').addEventListener('click', clicked);
-  expect(closeYoutubePanel(info)).toBe(true);
-  expect(clicked).toHaveBeenCalledTimes(1);
-  expect(closeYoutubePanel(bare)).toBe(false);
-
-  const { chat, holder } = chatPage(chatDoc('Chat'));
-  const chatClicked = vi.fn();
-  holder.doc.querySelector('#close-button button').addEventListener('click', chatClicked);
-  expect(closeYoutubePanel({ element: chat, kind: CHAT_PANEL })).toBe(true);
-  expect(chatClicked).toHaveBeenCalledTimes(1);
-  holder.doc = chatDoc('Chat', { header: false });
-  expect(closeYoutubePanel({ element: chat, kind: CHAT_PANEL })).toBe(false);
 });
 
 test('watching a chat title reports header changes, a reloaded frame and a header that shows up late, until stopped', async () => {
