@@ -1,0 +1,25 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "channel": "chrome",
+      "ignoreDefaultArgs": [
+        "--hide-scrollbars"
+      ],
+      "args": [
+        "--mute-audio"
+      ]
+    },
+    "contextOptions": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "locale": "ko-KR",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+    },
+    "initPage": [
+      "./tubekit.cjs"
+    ]
+  }
+}

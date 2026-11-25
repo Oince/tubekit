@@ -1,2 +1,4 @@
 node_modules/
 .claude/plans/
+.playwright-cli/
+.DS_Store
