@@ -326,6 +326,15 @@ test('an ended video is left where YouTube hides it so its last frame does not s
   }
 });
 
+test('the rotation button icon is shifted 2px right in the stylesheet to look centered', async () => {
+  await rotationPage();
+  const svg = document.querySelector('.tubekit-video-rotation-button svg');
+  const sheet = document.querySelector('#tubekit-video-rotation-styles').sheet;
+  const iconRules = [...sheet.cssRules].filter(rule => rule.selectorText && rule.selectorText.split(',').some(selector => svg.matches(selector)));
+  expect(iconRules.length).toBe(1);
+  expect(iconRules[0].style.transform).toBe('translateX(2px)');
+});
+
 test('embeds, shorts and other non-watch pages get no rotation styles', async () => {
   for (const url of [
     'https://www.youtube.com/embed/abcdefghijk',

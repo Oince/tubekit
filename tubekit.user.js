@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.8.2
+// @version      0.8.3
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -1837,6 +1837,9 @@
   }
   ${AD_PLAYER_SELECTORS.map((selector) => `${selector} .${PREFIX}-button`).join(",\n  ")} {
     display: none !important;
+  }
+  .${PREFIX}-button svg {
+    transform: translateX(2px);
   }
 `;
 	function addRotationStyles() {

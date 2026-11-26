@@ -31,6 +31,9 @@ const css = `
   ${AD_PLAYER_SELECTORS.map(selector => `${selector} .${PREFIX}-button`).join(',\n  ')} {
     display: none !important;
   }
+  .${PREFIX}-button svg {
+    transform: translateX(2px);
+  }
 `;
 
 export function addRotationStyles() {
