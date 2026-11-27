@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.8.3
+// @version      0.8.4
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -955,8 +955,8 @@
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
-      height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
-      max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
+      height: calc(100dvh - var(--ytd-masthead-height, 56px) - 24px) !important;
+      max-height: calc(100dvh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
       margin-top: 12px !important;
       padding-top: 0 !important;

@@ -792,6 +792,15 @@ test('emoji picker is not clipped inside the comments pane', async () => {
   expect(css).toMatch(/yt-emoji-picker-renderer #search-panel[^{]*\{[^}]*width: 100% !important;/);
 });
 
+test('secondary column height follows the visible viewport so Safari toolbars do not cut off its bottom', async () => {
+  const { document } = await setup();
+  const css = document.getElementById('tubekit-styles').textContent;
+  const secondary = css.match(/#secondary \{([^}]*)\}/)[1];
+  expect(secondary).toMatch(/\bheight: calc\(100dvh /);
+  expect(secondary).toMatch(/max-height: calc\(100dvh /);
+  expect(css).not.toMatch(/\d+vh\b/);
+});
+
 test('panes do not contain fixed-position menus such as the comment sort dropdown', async () => {
   const { document } = await setup();
   const css = document.getElementById('tubekit-styles').textContent;

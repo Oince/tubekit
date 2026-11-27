@@ -30,8 +30,8 @@ export function addStyles() {
       position: sticky !important;
       top: calc(var(--ytd-masthead-height, 56px) + 12px) !important;
       align-self: flex-start !important;
-      height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
-      max-height: calc(100vh - var(--ytd-masthead-height, 56px) - 24px) !important;
+      height: calc(100dvh - var(--ytd-masthead-height, 56px) - 24px) !important;
+      max-height: calc(100dvh - var(--ytd-masthead-height, 56px) - 24px) !important;
       min-height: 280px !important;
       margin-top: 12px !important;
       padding-top: 0 !important;
