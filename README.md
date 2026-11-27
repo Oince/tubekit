@@ -8,8 +8,6 @@ YouTube를 쓰면서 불편했던 점을 고치는 개인용 유저스크립트�
 https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
 ```
 
-버전별 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
-
 ## 기능
 
 ### 오른쪽 댓글 패널
