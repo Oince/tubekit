@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { createCommentsRegion, createRelatedRegion } from '../src/features/right-rail-comments/borrowed-region.js';
-import { createCommentsLoader } from '../src/features/right-rail-comments/comments-loader.js';
+import { createCommentsFollower } from '../src/features/right-rail-comments/comments-follower.js';
 import { initialLifecycle, mountFailed, step } from '../src/features/right-rail-comments/lifecycle.js';
 import { initialPanelSelection, nextPanelSelection } from '../src/features/right-rail-comments/panel-selection.js';
 import { advance, loadPage, onCleanup, startFeature, stubProperty } from './helpers.js';
@@ -317,7 +317,7 @@ test('secondary container replacement recovers with the new related content', as
   expect(document.querySelectorAll('#related').length).toBe(1);
 });
 
-test('replacement comments are adopted and observed', async () => {
+test('replacement comments are adopted', async () => {
   const { document } = await setup();
   document.querySelector('#comments').remove();
   const replacement = newComments(document);
@@ -325,10 +325,6 @@ test('replacement comments are adopted and observed', async () => {
   document.querySelector('#below').append(replacement);
   await advance(200);
   expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(replacement);
-  expect(document.querySelector('.tubekit-status')).toBeTruthy();
-  replacement.append(document.createElement('ytd-comments-header-renderer'));
-  await advance(350);
-  expect(document.querySelector('.tubekit-status')).toBe(null);
 });
 
 test('native reparenting of the existing comments is repaired', async () => {
@@ -354,64 +350,44 @@ test('the comments element YouTube reuses for the next video passes to the new p
   expect(pane.querySelector('#comments')).toBe(reused);
   expect(document.querySelector('#primary #comments')).toBe(null);
   expect(document.querySelectorAll('#comments').length).toBe(1);
-  expect(pane.querySelector('.tubekit-status').dataset.kind).toBe('loading');
   reused.append(document.createElement('ytd-comments-header-renderer'));
-  await advance(600);
-  expect(document.querySelector('.tubekit-status')).toBe(null);
   await advance(30_000);
-  expect(document.querySelector('.tubekit-status')).toBe(null);
   expect(pane.querySelector('#comments')).toBe(reused);
   expect(selected(document)).toBe('comments');
 });
 
 
-test('unavailable timer from the previous video cannot switch the new tab', async () => {
-  const { document, watch } = await setup({ disabled: true });
-  document.dispatchEvent(new Event('yt-navigate-start'));
-  history.pushState({}, '', '/watch?v=B');
-  watch.setAttribute('video-id', 'B');
-  document.querySelector('#below').append(newComments(document));
-  document.dispatchEvent(new Event('yt-navigate-finish'));
-  await advance(1000);
-  expect(selected(document)).toBe('comments');
-});
-
-test('comments turned off show a notice, clear the loading box, and switch to related after 0.9 seconds', async () => {
+test('comments the uploader turned off stay on the comments tab with YouTube\'s own notice, and nothing else appears', async () => {
   const { document } = await setup({ disabled: true });
-  const toast = document.querySelector('#tubekit-toast');
-  expect(toast.dataset.visible).toBe('true');
-  expect(toast.textContent).toBe('Comments are unavailable for this video. Showing related videos.');
-  expect(document.querySelector('.tubekit-status')).toBe(null);
-  await advance(600);
+  const pane = document.querySelector('#tubekit-comments-pane');
+  expect(pane.querySelector('#comments ytd-message-renderer').textContent).toBe('Comments are turned off');
+  await advance(30_000);
   expect(selected(document)).toBe('comments');
-  await advance(150);
-  expect(selected(document)).toBe('related');
-  await advance(4000);
-  expect(toast.dataset.visible).toBe('false');
-});
-
-test('an off message that goes away within 0.9 seconds cancels the switch to related', async () => {
-  const { document } = await setup({ disabled: true });
-  document.querySelector('#comments').innerHTML = '';
-  await advance(300);
-  await advance(1000);
-  expect(selected(document)).toBe('comments');
+  expect(pane.querySelector('#comments ytd-message-renderer').textContent).toBe('Comments are turned off');
+  expect(document.querySelector('#tubekit-toast')).toBe(null);
   expect(document.querySelector('.tubekit-status')).toBe(null);
 });
 
-test('comments that fail to load show an error with a retry button that switches back and loads them again', async () => {
+test('hidden empty comments of a live broadcast stay on the comments tab without any Tubekit message', async () => {
   const { document } = await setup({ liveStream: true });
-  await advance(20_500);
-  const status = document.querySelector('#tubekit-comments-pane .tubekit-status');
-  expect(status.dataset.kind).toBe('error');
-  expect(status.textContent).toBe('Comments could not be loaded.Retry');
-  document.querySelector('#tubekit-related-tab').click();
-  status.querySelector('button').click();
+  const pane = document.querySelector('#tubekit-comments-pane');
+  await advance(30_000);
   expect(selected(document)).toBe('comments');
-  expect(document.querySelector('#tubekit-comments-pane .tubekit-status').dataset.kind).toBe('loading');
-  document.querySelector('#comments').insertAdjacentHTML('beforeend', '<ytd-comments-header-renderer></ytd-comments-header-renderer>');
-  await advance(600);
+  expect(pane.querySelector('#comments')).toBe(document.querySelector('#comments'));
+  expect(document.querySelector('#tubekit-toast')).toBe(null);
   expect(document.querySelector('.tubekit-status')).toBe(null);
+  expect(pane.textContent).toBe('');
+});
+
+test('comments YouTube creates more than 20 seconds late are still taken into the panel', async () => {
+  const { document } = await setup({ beforeStart: () => globalThis.document.querySelector('#comments').remove() });
+  await advance(60_000);
+  expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(null);
+  expect(selected(document)).toBe('comments');
+  const late = newComments(document);
+  document.querySelector('#below').append(late);
+  await advance(300);
+  expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(late);
   expect(selected(document)).toBe('comments');
 });
 
@@ -599,12 +575,10 @@ function expectedTokens(d) {
     ['outline', `${SYS('outline')}var(--yt-spec-10-percent-layer, ${d.outline}))`],
     ['hover', `${SYS('additive-background')}var(--yt-spec-10-percent-layer, ${d.hover}))`],
     ['selected', `${SYS('button-chip-background-hover')}var(--yt-spec-badge-chip-background, ${d.selected}))`],
-    ['toast-bg', `${SYS('inverted-background')}${d.toastBg})`],
-    ['toast-text', `${SYS('text-primary-inverse')}var(--yt-spec-text-primary-inverse, ${d.toastText}))`],
   ]);
 }
-const LIGHT = { bg: '#fff', text: '#0f0f0f', secondary: '#606060', outline: 'rgba(0, 0, 0, .1)', hover: 'rgba(0, 0, 0, .05)', selected: 'rgba(0, 0, 0, .1)', toastBg: '#0f0f0f', toastText: '#fff' };
-const DARK = { bg: '#0f0f0f', text: '#f1f1f1', secondary: '#aaa', outline: 'rgba(255, 255, 255, .2)', hover: 'rgba(255, 255, 255, .1)', selected: 'rgba(255, 255, 255, .2)', toastBg: '#f1f1f1', toastText: '#0f0f0f' };
+const LIGHT = { bg: '#fff', text: '#0f0f0f', secondary: '#606060', outline: 'rgba(0, 0, 0, .1)', hover: 'rgba(0, 0, 0, .05)', selected: 'rgba(0, 0, 0, .1)' };
+const DARK = { bg: '#0f0f0f', text: '#f1f1f1', secondary: '#aaa', outline: 'rgba(255, 255, 255, .2)', hover: 'rgba(255, 255, 255, .1)', selected: 'rgba(255, 255, 255, .2)' };
 
 function parseTokens(block) {
   const map = new Map();
@@ -626,7 +600,6 @@ function checkStyles(css) {
   expect(rootRule[0]).toMatch(/color: var\(--tubekit-text\);/);
   expect(rootRule[0]).toMatch(/background: var\(--tubekit-bg\);/);
   expect(css.match(/#tubekit-tabs \{[^}]*\}/)[0]).toMatch(/background: var\(--tubekit-bg\);/);
-  expect(css.match(/#tubekit-toast \{[^}]*\}/)[0]).toMatch(/background: var\(--tubekit-toast-bg\);/);
   const rest = css.replace(lightRule[0], '').replace(darkRule[0], '');
   expect(rest).not.toMatch(/--yt-spec-|--yt-sys-/);
 }
@@ -643,7 +616,7 @@ test('mutations inside adopted comments do not trigger evaluation', async () => 
   for (let i = 0; i < 5; i++) {
     comments.appendChild(document.createElement('ytd-comment-thread-renderer'));
     await mutationsSettle();
-    expect(vi.getTimerCount(), 'only the throttled comments check is pending').toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
     await advance(30);
   }
   await advance(300);
@@ -676,12 +649,15 @@ test('evaluation is deferred while the pane is scrolling', async () => {
   expect(vi.getTimerCount(), 'evaluation ran').toBe(0);
 });
 
-test('removing comments from the pane is still detected', async () => {
+test('removing comments from the pane is still detected, and the next comments are taken when they show up', async () => {
   const { document } = await setup();
-  expect(document.querySelector('.tubekit-status')).toBe(null);
   document.querySelector('#comments').remove();
   await advance(300);
-  expect(document.querySelector('.tubekit-status')).toBeTruthy();
+  expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(null);
+  const next = newComments(document);
+  document.querySelector('#below').append(next);
+  await advance(300);
+  expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(next);
 });
 
 test('mutations on nodes removed within the same batch do not trigger evaluation', async () => {
@@ -693,28 +669,7 @@ test('mutations on nodes removed within the same batch do not trigger evaluation
   div.appendChild(document.createElement('span'));
   div.remove();
   await mutationsSettle();
-  expect(vi.getTimerCount(), 'only the throttled comments check is pending').toBe(1);
-  await advance(300);
   expect(vi.getTimerCount()).toBe(0);
-});
-
-test('comment mutation bursts are checked at most once per throttle window', async () => {
-  const { document } = await setup();
-  const comments = document.querySelector('#comments');
-  let calls = 0;
-  const original = comments.querySelector;
-  comments.querySelector = function (...args) {
-    calls++;
-    return original.apply(this, args);
-  };
-  for (let i = 0; i < 10; i++) comments.appendChild(document.createElement('ytd-comment-thread-renderer'));
-  for (let i = 0; i < 3; i++) {
-    await advance(16);
-    comments.appendChild(document.createElement('ytd-comment-thread-renderer'));
-  }
-  expect(calls).toBe(0);
-  await advance(400);
-  expect(calls > 0 && calls <= 4, `querySelector calls: ${calls}`).toBeTruthy();
 });
 
 test('mutations inside the player do not trigger evaluation', async () => {
@@ -891,33 +846,34 @@ test('scroll position survives opening and closing a special panel on both tabs'
   }
 });
 
-test('live streams with hidden comments beside the chat fall back to related and hold with the chat', async () => {
+test('live streams with hidden comments hold with the chat and come back on the comments tab when the chat closes', async () => {
   const { document } = await setup({ liveStream: true });
-  expect(document.querySelector('#tubekit-comments-pane .tubekit-status')).toBeTruthy();
   const chat = document.createElement('div');
   chat.id = 'chat-container';
   chat.innerHTML = '<ytd-live-chat-frame id="chat"></ytd-live-chat-frame>';
   document.querySelector('#secondary-inner').prepend(chat);
-  await advance(4400);
+  await advance(30_000);
   expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('true');
-  expect(selected(document)).toBe('related');
-  expect(document.querySelector('#tubekit-comments-pane .tubekit-status')).toBe(null);
+  expect(selected(document)).toBe('comments');
+  expect(document.querySelector('#tubekit-toast')).toBe(null);
   chat.firstElementChild.setAttribute('collapsed', '');
   await advance(200);
   expect(document.querySelector('#tubekit-root').dataset.suspended).toBe('false');
-  expect(selected(document)).toBe('related');
+  expect(selected(document)).toBe('comments');
+  expect(document.querySelector('#tubekit-comments-pane').textContent).toBe('');
+  expect(document.querySelector('.tubekit-status')).toBe(null);
 });
 
-test('comments found off while a YouTube panel holds the panel come back on the related tab when the panel closes', async () => {
+test('the tab chosen before a YouTube panel holds the panel is the tab shown when the panel closes', async () => {
   const { document } = await setup({ disabled: true });
   const root = document.querySelector('#tubekit-root');
+  document.querySelector('#tubekit-related-tab').click();
   const panel = expandedPanel(document);
   document.querySelector('#secondary-inner').append(panel);
   await advance(100);
   expect(root.dataset.suspended).toBe('true');
-  expect(selected(document)).toBe('comments');
-  await advance(800);
-  expect(selected(document), 'switched while held').toBe('related');
+  await advance(2000);
+  expect(selected(document)).toBe('related');
   panel.remove();
   await advance(200);
   expect(root.dataset.suspended).toBe('false');
@@ -975,30 +931,6 @@ async function scrollBothTabs(positions = { comments: 300, related: 700 }) {
 const frames = async () => {
   for (let i = 0; i < 2; i++) await advance(16);
 };
-
-test('switching tabs while a YouTube panel holds the panel keeps both saved scroll positions', async () => {
-  const { document } = await setup();
-  const root = document.querySelector('#tubekit-root');
-  const panes = await scrollBothTabs();
-  const panel = expandedPanel(document);
-  document.querySelector('#secondary-inner').append(panel);
-  await advance(16);
-  expect(root.dataset.suspended).toBe('true');
-  Object.values(panes).forEach(pane => { pane.hidden = true; });
-  document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
-  await advance(1300);
-  expect(selected(document), 'switched while held').toBe('related');
-  panel.remove();
-  await advance(16);
-  expect(root.dataset.suspended).toBe('false');
-  Object.values(panes).forEach(pane => { pane.hidden = false; });
-  await frames();
-  expect(selected(document)).toBe('related');
-  expect(panes.related.value).toBe(700);
-  document.querySelector('[role="tab"][data-tab="comments"]').click();
-  await frames();
-  expect(panes.comments.value).toBe(300);
-});
 
 test('fullscreen holds the panel and restores the tab and both scroll positions on exit', async () => {
   const { document } = await setup();
@@ -1154,7 +1086,6 @@ describe('moving to another video', () => {
     expect(root.dataset.suspended).toBe('false');
     expect(selected(document)).toBe('related');
     expect(panes.related.value).toBe(700);
-    expect(document.querySelector('.tubekit-status')).toBe(null);
   }
 
   test('the panel stays as it is while the address names a new video and the page still shows the old one', async () => {
@@ -1190,7 +1121,6 @@ describe('moving to another video', () => {
     document.querySelector('#below').append(arriving);
     await advance(500);
     expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(arriving);
-    expect(document.querySelector('.tubekit-status')).toBe(null);
   });
 
   test('going back to the old video after the page moved on shows a fresh panel on the comments tab', async () => {
@@ -1331,9 +1261,8 @@ describe('moving to another video', () => {
     expect(document.querySelector('#tubekit-root')).toBe(null);
   });
 
-  test('YouTube emptying or replacing the comments during the lag raises no notice, switches no tab and shows no error', async () => {
+  test('YouTube emptying or replacing the comments during the lag switches no tab', async () => {
     const { document } = await setup();
-    const toast = document.querySelector('#tubekit-toast');
     moveAddress('B');
     document.querySelector('#comments').innerHTML = '';
     await advance(30_000);
@@ -1343,28 +1272,23 @@ describe('moving to another video', () => {
     document.querySelector('#comments').setAttribute('hidden', '');
     document.querySelector('#secondary-inner').prepend(document.createElement('ytd-live-chat-frame'));
     await advance(30_000);
-    expect(toast.dataset.visible).not.toBe('true');
-    expect(toast.textContent).toBe('');
     expect(selected(document)).toBe('comments');
-    expect(document.querySelector('.tubekit-status')).toBe(null);
     expect(document.querySelector('#tubekit-root')).toBeTruthy();
   });
 
-  test('YouTube taking the comments away during the lag shows no error however long the lag lasts', async () => {
+  test('YouTube taking the comments away during the lag keeps the panel however long the lag lasts', async () => {
     const { document, watch } = await setup();
     moveAddress('B');
     document.querySelector('#comments').remove();
     await advance(60_000);
     expect(selected(document)).toBe('comments');
-    expect(document.querySelector('#tubekit-toast').textContent).toBe('');
-    expect(document.querySelector('.tubekit-status')).toBe(null);
     pageMoves(watch, 'B');
     await mutationsSettle();
     expect(document.querySelector('#tubekit-root')).toBeTruthy();
     expect(selected(document)).toBe('comments');
   });
 
-  test('comments YouTube puts in place of the old ones during the lag are taken without a loading box', async () => {
+  test('comments YouTube puts in place of the old ones during the lag are taken', async () => {
     const { document } = await setup();
     const old = document.querySelector('#comments');
     moveAddress('B');
@@ -1375,8 +1299,6 @@ describe('moving to another video', () => {
     await advance(30_000);
     expect(document.querySelector('#tubekit-comments-pane #comments')).toBe(replacement);
     expect(document.querySelector('#primary #comments')).toBe(null);
-    expect(document.querySelector('.tubekit-status')).toBe(null);
-    expect(document.querySelector('#tubekit-toast').textContent).toBe('');
   });
 
   test('the page video-id being emptied for a moment keeps the panel, and the new video then swaps it', async () => {
@@ -1412,31 +1334,6 @@ describe('moving to another video', () => {
     expect(document.documentElement.classList.contains('tubekit-suspended')).toBe(false);
     expect(document.documentElement.classList.contains('tubekit-active')).toBe(false);
     expect(document.querySelector('#secondary-inner > #related')).toBe(related);
-  });
-
-  test('the switch to related for comments turned off waits for the address to name the video again', async () => {
-    const { document } = await setup({ disabled: true });
-    await advance(100);
-    moveAddress('B');
-    await advance(1500);
-    expect(selected(document)).toBe('comments');
-    history.pushState({}, '', '/watch?v=A');
-    window.dispatchEvent(new Event('popstate'));
-    await advance(300);
-    expect(selected(document)).toBe('related');
-  });
-
-  test('comments emptied during a lag that ends on the same video are judged again from what YouTube shows', async () => {
-    const { document } = await setup();
-    moveAddress('B');
-    document.querySelector('#comments').innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
-    await advance(2000);
-    expect(document.querySelector('#tubekit-toast').dataset.visible).not.toBe('true');
-    history.pushState({}, '', '/watch?v=A');
-    window.dispatchEvent(new Event('urlchange'));
-    await advance(2000);
-    expect(document.querySelector('#tubekit-toast').dataset.visible).toBe('true');
-    expect(selected(document)).toBe('related');
   });
 
   test('the tab remembered on the old video is forgotten once another video was shown in between', async () => {
@@ -1632,143 +1529,49 @@ function comments() {
   return document.querySelector('ytd-comments#comments');
 }
 
-function startLoader({ videoId = 'A', content = null, attributes = '', start = true } = {}) {
-  const page = borrowPage(videoId);
+function startFollower({ content = null, attributes = '', start = true } = {}) {
+  const page = borrowPage();
   if (content !== null) page.below.append(nativeComments(content, attributes));
   const region = createCommentsRegion(page.commentsPane, page.root);
-  const states = [];
-  const loader = createCommentsLoader({ region, watch: page.watch, videoId, onChange: state => states.push(state) });
-  onCleanup(() => loader.dispose());
-  if (start) loader.start();
-  return { ...page, region, loader, states };
+  const follower = createCommentsFollower({ region, watch: page.watch });
+  onCleanup(() => follower.dispose());
+  if (start) follower.start();
+  return { ...page, region, follower };
 }
 
-describe('comments loader', () => {
-  test('comments that appear late go from loading to loaded', async () => {
-    const { loader, below, states, region } = startLoader();
-    expect(loader.state).toBe('loading');
-    await advance(1000);
+describe('comments follower', () => {
+  test('comments present at the start are taken at once', () => {
+    const { region, commentsPane } = startFollower({ content: HEADER });
+    expect(region.node).toBe(comments());
+    expect(commentsPane.contains(comments())).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  test('comments that appear late are taken, however late', async () => {
+    const { below, region, commentsPane } = startFollower();
+    await advance(120_000);
+    expect(region.node).toBe(null);
     below.append(nativeComments());
     await advance(300);
     expect(region.node).toBe(comments());
-    expect(loader.state).toBe('loading');
-    comments().insertAdjacentHTML('beforeend', HEADER);
-    await advance(300);
-    expect(loader.state).toBe('loaded');
-    expect(states).toStrictEqual(['loaded']);
+    expect(commentsPane.contains(comments())).toBe(true);
+    await advance(1000);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  test('comments present at the start are loaded at once', () => {
-    const { loader, states } = startLoader({ content: HEADER });
-    expect(loader.state).toBe('loaded');
-    expect(states).toStrictEqual(['loaded']);
-  });
-
-  test('comments that never appear fail after 20 seconds', async () => {
-    const { loader, states } = startLoader();
-    await advance(19_700);
-    expect(loader.state).toBe('loading');
-    await advance(600);
-    expect(loader.state).toBe('failed');
-    expect(states).toStrictEqual(['failed']);
-    await advance(30_000);
-    expect(states).toStrictEqual(['failed']);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  test('comments that appear after the failure are loaded', async () => {
-    const { loader, states } = startLoader({ content: '' });
-    await advance(21_000);
-    expect(loader.state).toBe('failed');
-    comments().insertAdjacentHTML('beforeend', HEADER);
-    await advance(300);
-    expect(states).toStrictEqual(['failed', 'loaded']);
-  });
-
-  test('comments the uploader turns off after the failure are turned off', async () => {
-    const { loader, states } = startLoader({ content: '' });
-    await advance(21_000);
-    comments().insertAdjacentHTML('beforeend', MESSAGE);
-    await advance(300);
-    expect(states).toStrictEqual(['failed', 'off']);
-    expect(loader.state).toBe('off');
-  });
-
-  test('comments the uploader turned off are decided at once', () => {
-    const { loader, states } = startLoader({ content: MESSAGE });
-    expect(loader.state).toBe('off');
-    expect(states).toStrictEqual(['off']);
-  });
-
-  test('a message beside a header or a thread does not turn comments off', () => {
-    for (const content of [`${MESSAGE}${HEADER}`, `${MESSAGE}<ytd-comment-thread-renderer></ytd-comment-thread-renderer>`]) {
-      const { loader, states } = startLoader({ content });
-      expect(loader.state, content).toBe('loaded');
-      expect(states, content).toStrictEqual(['loaded']);
+  test('the content of the taken comments is left to YouTube whatever it is', async () => {
+    for (const [content, attributes] of [[MESSAGE, ''], ['', 'hidden'], [HEADER, '']]) {
+      const { inner, commentsPane, region } = startFollower({ content, attributes });
+      inner.prepend(Object.assign(document.createElement('div'), { innerHTML: CHAT }).firstChild);
+      await advance(60_000);
+      expect(region.node, content).toBe(comments());
+      expect(commentsPane.children.length, content).toBe(1);
+      expect(commentsPane.textContent, content).toBe(comments().textContent);
     }
   });
 
-  test('comments whose off message goes away are no longer off', async () => {
-    const { loader, states } = startLoader({ content: MESSAGE });
-    comments().innerHTML = '';
-    await advance(300);
-    expect(states).toStrictEqual(['off', 'loaded']);
-    expect(loader.state).toBe('loaded');
-  });
-
-  test('comments that turn into a message after loading are turned off', async () => {
-    const { loader, states } = startLoader({ content: HEADER });
-    comments().innerHTML = MESSAGE;
-    await advance(300);
-    expect(states).toStrictEqual(['loaded', 'off']);
-    expect(loader.state).toBe('off');
-  });
-
-  test('a live broadcast look is decided only after 3 seconds', async () => {
-    const { loader, inner, states } = startLoader({ content: '', attributes: 'hidden' });
-    inner.prepend(Object.assign(document.createElement('div'), { innerHTML: CHAT }).firstChild);
-    await advance(2800);
-    expect(loader.state).toBe('loading');
-    await advance(600);
-    expect(loader.state).toBe('off');
-    expect(states).toStrictEqual(['off']);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  test('hidden empty comments without a live chat keep loading until they fail', async () => {
-    const { loader, states } = startLoader({ content: '', attributes: 'hidden' });
-    await advance(10_000);
-    expect(loader.state).toBe('loading');
-    await advance(10_500);
-    expect(states).toStrictEqual(['failed']);
-  });
-
-  test('retrying starts loading again with a fresh 20 seconds', async () => {
-    const { loader, states, below } = startLoader();
-    loader.retry();
-    expect(states).toStrictEqual([]);
-    await advance(21_000);
-    expect(loader.state).toBe('failed');
-    loader.retry();
-    expect(loader.state).toBe('loading');
-    await advance(19_700);
-    expect(loader.state).toBe('loading');
-    below.append(nativeComments(HEADER));
-    await advance(300);
-    expect(states).toStrictEqual(['failed', 'loading', 'loaded']);
-  });
-
-  test('retrying fails again after another 20 seconds', async () => {
-    const { loader, states } = startLoader();
-    await advance(21_000);
-    loader.retry();
-    await advance(20_500);
-    expect(states).toStrictEqual(['failed', 'loading', 'failed']);
-  });
-
-  test('adopting comments and retrying nudge YouTube to load by scrolling', async () => {
-    const { commentsPane, below, loader } = startLoader();
+  test('taking comments nudges YouTube to load them by scrolling', async () => {
+    const { commentsPane, below } = startFollower();
     const controller = new AbortController();
     onCleanup(() => controller.abort());
     const scrolls = { pane: 0, window: 0 };
@@ -1777,145 +1580,90 @@ describe('comments loader', () => {
     below.append(nativeComments('', 'hidden'));
     await advance(320);
     expect(scrolls).toStrictEqual({ pane: 1, window: 1 });
-    await advance(21_000);
-    expect(loader.state).toBe('failed');
-    scrolls.pane = 0;
-    scrolls.window = 0;
-    loader.retry();
-    expect(scrolls).toStrictEqual({ pane: 1, window: 1 });
   });
 
-  test('after being disposed nothing changes the state and no timer or observer is left', async () => {
-    const { loader, below, states } = startLoader();
+  test('after being disposed nothing is taken and no timer is left', async () => {
+    const { follower, below, region } = startFollower();
     await advance(500);
-    loader.dispose();
+    follower.dispose();
     below.append(nativeComments(HEADER));
     await advance(30_000);
-    expect(loader.state).toBe('loading');
-    expect(states).toStrictEqual([]);
+    follower.refresh();
+    expect(region.node).toBe(null);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  test('disposing with a check pending ignores the late change', async () => {
-    const { loader, states } = startLoader({ content: '' });
-    comments().insertAdjacentHTML('beforeend', HEADER);
-    await Promise.resolve();
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
-    loader.dispose();
-    expect(vi.getTimerCount()).toBe(0);
-    await advance(1000);
-    expect(states).toStrictEqual([]);
-    loader.retry();
-    loader.refresh();
-    expect(states).toStrictEqual([]);
-  });
-
-  test('the loader ignores comments that outlive the video it was made for', async () => {
-    const { loader, states } = startLoader({ content: '' });
-    history.pushState({}, '', '/watch?v=B');
-    comments().insertAdjacentHTML('beforeend', HEADER);
-    await advance(600);
-    expect(loader.state).toBe('loading');
-    expect(states).toStrictEqual([]);
-  });
-
-  test('a loader still waiting while the address names another video neither fails nor decides, and goes on when the address comes back', async () => {
-    const { loader, below, states } = startLoader();
-    history.pushState({}, '', '/watch?v=B');
-    await advance(60_000);
-    expect(loader.state).toBe('loading');
-    expect(states).toStrictEqual([]);
-    history.pushState({}, '', '/watch?v=A');
+  test('a detached pane stops the waiting and takes nothing', async () => {
+    const { commentsPane, below, region } = startFollower();
+    await advance(500);
+    commentsPane.remove();
     await advance(300);
     below.append(nativeComments(HEADER));
-    await advance(600);
-    expect(states).toStrictEqual(['loaded']);
+    await advance(30_000);
+    expect(region.node).toBe(null);
+    expect(comments().parentNode).toBe(below);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  test('changes seen while the address names another video are judged once it names the video again', async () => {
-    const { loader, states } = startLoader({ content: HEADER });
-    expect(states).toStrictEqual(['loaded']);
-    history.pushState({}, '', '/watch?v=B');
-    comments().innerHTML = '<ytd-message-renderer>Comments are turned off</ytd-message-renderer>';
+  test('disposing right after taking comments cancels the pending scroll', async () => {
+    const { follower, commentsPane } = startFollower({ content: HEADER });
+    let scrolls = 0;
+    commentsPane.addEventListener('scroll', () => { scrolls += 1; });
+    follower.dispose();
     await advance(1000);
-    expect(states).toStrictEqual(['loaded']);
-    history.pushState({}, '', '/watch?v=A');
-    loader.refresh();
-    expect(loader.state).toBe('off');
+    expect(scrolls).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  test('comments replaced while the address names another video are taken without a loading state and loaded again on return', async () => {
-    const { loader, below, states, region, commentsPane } = startLoader({ content: HEADER });
+  test('comments replaced while the address names another video are taken at once', async () => {
+    const { follower, below, region, commentsPane } = startFollower({ content: HEADER });
     const old = comments();
     history.pushState({}, '', '/watch?v=B');
     old.remove();
     const replacement = nativeComments();
     below.append(replacement);
-    loader.refresh();
-    await advance(1000);
-    expect(states).toStrictEqual(['loaded']);
+    follower.refresh();
     expect(region.node).toBe(replacement);
     expect(commentsPane.contains(replacement)).toBe(true);
-    history.pushState({}, '', '/watch?v=A');
-    loader.refresh();
-    expect(states).toStrictEqual(['loaded', 'loading']);
-    replacement.insertAdjacentHTML('beforeend', HEADER);
-    await advance(600);
-    expect(states).toStrictEqual(['loaded', 'loading', 'loaded']);
+    expect(old.isConnected).toBe(false);
   });
 
-  test('comments that fill in while the address names another video are decided as soon as it names the video again, not failed later', async () => {
-    const { loader, below, states } = startLoader();
-    await advance(500);
-    below.append(nativeComments());
-    await advance(300);
-    history.pushState({}, '', '/watch?v=B');
-    comments().insertAdjacentHTML('beforeend', HEADER);
-    await advance(1000);
-    expect(states).toStrictEqual([]);
-    history.pushState({}, '', '/watch?v=A');
-    await advance(600);
-    expect(states).toStrictEqual(['loaded']);
-    await advance(30_000);
-    expect(states).toStrictEqual(['loaded']);
-    expect(loader.state).toBe('loaded');
-  });
-
-  test('replaced comments load again from the start', async () => {
-    const { loader, below, states, region } = startLoader({ content: HEADER });
-    loader.refresh();
-    expect(states).toStrictEqual(['loaded']);
+  test('replaced comments are taken in place of the old ones', () => {
+    const { follower, below, region } = startFollower({ content: HEADER });
     const old = comments();
     old.remove();
     const replacement = nativeComments();
     below.append(replacement);
-    loader.refresh();
-    expect(states).toStrictEqual(['loaded', 'loading']);
+    follower.refresh();
     expect(region.node).toBe(replacement);
     expect(old.isConnected).toBe(false);
-    replacement.insertAdjacentHTML('beforeend', HEADER);
-    await advance(300);
-    expect(states).toStrictEqual(['loaded', 'loading', 'loaded']);
   });
 
-  test('comments removed from the pane load again when new ones show up', async () => {
-    const { loader, below, states } = startLoader({ content: HEADER });
+  test('comments removed from the pane are taken again when new ones show up', async () => {
+    const { follower, below, region } = startFollower({ content: HEADER });
     comments().remove();
-    loader.refresh();
-    expect(states).toStrictEqual(['loaded', 'loading']);
+    follower.refresh();
+    expect(region.node).toBe(null);
     await advance(1000);
-    below.append(nativeComments(HEADER));
+    const next = nativeComments(HEADER);
+    below.append(next);
     await advance(300);
-    expect(states).toStrictEqual(['loaded', 'loading', 'loaded']);
+    expect(region.node).toBe(next);
   });
 
   test('native comments moved out of the pane by YouTube are taken back', () => {
-    const { loader, below, states, commentsPane } = startLoader({ content: HEADER });
+    const { follower, below, commentsPane } = startFollower({ content: HEADER });
     const node = comments();
     below.append(node);
-    loader.refresh();
-    expect(states).toStrictEqual(['loaded', 'loading', 'loaded']);
+    follower.refresh();
     expect(commentsPane.contains(node)).toBe(true);
+  });
+
+  test('refreshing with nothing replaced changes nothing', () => {
+    const { follower, region } = startFollower({ content: HEADER });
+    const node = comments();
+    follower.refresh();
+    expect(region.node).toBe(node);
   });
 });
 
@@ -2682,6 +2430,17 @@ describe('YouTube panels fill the place of the held comments panel', () => {
     await settle();
     expect(document.querySelector('#tubekit-root')).toBeTruthy();
     expect(tabSelected()).toBe('One');
+  });
+
+  test('stopping the feature cancels an evaluation that is still scheduled', async () => {
+    const { stop } = await setup();
+    expect(vi.getTimerCount()).toBe(0);
+    document.dispatchEvent(new Event('yt-navigate-start'));
+    expect(vi.getTimerCount()).toBe(1);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(1000);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   test('stopping the feature removes what it put on the page', async () => {

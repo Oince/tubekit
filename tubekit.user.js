@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tubekit
 // @namespace    oince.tubekit
-// @version      0.8.4
+// @version      0.8.5
 // @author       Oince
 // @description  개인용 YouTube 편의 기능 모음.
 // @downloadURL  https://raw.githubusercontent.com/Oince/tubekit/main/tubekit.user.js
@@ -39,7 +39,6 @@
 	var RELATED_SELECTORS = ["#related", "ytd-watch-next-secondary-results-renderer#related"];
 	var COMMENTS_SELECTOR = "ytd-comments#comments";
 	var COMMENTS_HOME_SELECTOR = `${PRIMARY_SELECTOR} #below`;
-	var COMMENTS_LOADED_SELECTOR = "ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count";
 	var PAGE_VIDEO_ID_ATTRIBUTE = "video-id";
 	var FULLSCREEN_ATTRIBUTE = "fullscreen";
 	var WATCH_HIDDEN_ATTRIBUTE = "hidden";
@@ -339,8 +338,6 @@
 	function requestLayout() {
 		window.dispatchEvent(new Event("resize"));
 	}
-	var COMMENTS_OFF_BY_UPLOADER = "uploader";
-	var COMMENTS_OFF_LIVE_LOOK = "live-look";
 	function findNativeComments(watch, ignoreInside = null) {
 		if (!watch) return null;
 		return [...watch.querySelectorAll("ytd-comments#comments")].find((node) => !(ignoreInside && node.closest(ignoreInside)) && node.closest("#primary")) || null;
@@ -349,16 +346,6 @@
 		const secondaryInner = findSecondaryInner(watch);
 		if (!secondaryInner) return null;
 		return [...secondaryInner.children].find((child) => child.matches(RELATED_SELECTORS.join(", "))) || null;
-	}
-	function commentsHaveLoaded(node) {
-		if (!node) return false;
-		return Boolean(node.querySelector(COMMENTS_LOADED_SELECTOR));
-	}
-	function commentsOffCandidate(node, watch) {
-		if (!node) return null;
-		if (node.querySelector("ytd-message-renderer, #message") && !node.querySelector("ytd-comments-header-renderer, ytd-comment-thread-renderer")) return COMMENTS_OFF_BY_UPLOADER;
-		if (node.hasAttribute("hidden") && !node.firstElementChild && watch?.querySelector(`#secondary-inner ${CHAT_FRAME_SELECTOR}`)) return COMMENTS_OFF_LIVE_LOOK;
-		return null;
 	}
 	var QUALITY_HEIGHT = {
 		highres: 4320,
@@ -510,31 +497,11 @@
 			yieldsToYouTubeMoves: true
 		});
 	}
-	var COMMENTS_WAIT_MS = 2e4;
-	var LIVE_COMMENTS_GRACE_MS = 3e3;
 	var COMMENTS_CHECK_MS = 250;
-	var LOADING = "loading";
-	var LOADED = "loaded";
-	var FAILED = "failed";
-	function createCommentsLoader({ region, watch, videoId, onChange }) {
-		let state = LOADING;
+	function createCommentsFollower({ region, watch }) {
 		let disposed = false;
-		let observer = null;
 		let findTimer = 0;
-		let checkTimer = 0;
-		let uploaderOff = false;
-		let paused = false;
-		let replacedAway = false;
 		const frames = new Set();
-		const isDecided = () => state === "loaded" || state === "off";
-		function emit(next) {
-			state = next;
-			onChange(next);
-		}
-		function settle(next) {
-			window.clearTimeout(findTimer);
-			if (state !== next) emit(next);
-		}
 		function nextFrame(callback) {
 			const frame = requestAnimationFrame(() => {
 				frames.delete(frame);
@@ -542,151 +509,33 @@
 			});
 			frames.add(frame);
 		}
-		function check() {
-			const node = region.node;
-			if (disposed || !node) return;
-			if (videoId !== urlVideoId()) {
-				paused = true;
-				return;
-			}
-			paused = false;
-			if (commentsOffCandidate(node, watch) === "uploader") {
-				if (!uploaderOff) {
-					uploaderOff = true;
-					window.clearTimeout(findTimer);
-					emit("off");
-				} else settle("off");
-				return;
-			}
-			uploaderOff = false;
-			if (commentsHaveLoaded(node) || state === "off") settle(LOADED);
-		}
-		function observe() {
-			observer?.disconnect();
-			window.clearTimeout(checkTimer);
-			checkTimer = 0;
-			uploaderOff = false;
-			const node = region.node;
-			if (!node) return;
-			observer = new MutationObserver(() => {
-				if (checkTimer) return;
-				checkTimer = window.setTimeout(() => {
-					checkTimer = 0;
-					check();
-				}, COMMENTS_CHECK_MS);
-			});
-			observer.observe(node, {
-				childList: true,
-				subtree: true
-			});
-			check();
-		}
-		function stopWatching() {
-			observer?.disconnect();
-			window.clearTimeout(checkTimer);
-			checkTimer = 0;
-			window.clearTimeout(findTimer);
-		}
-		function reload() {
-			paused = false;
-			replacedAway = false;
-			stopWatching();
-			region.forget();
-			emit(LOADING);
-			wait();
-		}
-		function adoptWhileAway() {
-			paused = true;
-			replacedAway = true;
-			stopWatching();
-			region.forget();
-			if (region.take(watch)) observe();
-			else wait();
-		}
 		function adopt() {
 			if (disposed || !region.pane.isConnected) return true;
-			if (region.node) return isDecided();
+			if (region.node) return true;
 			if (!region.take(watch)) return false;
-			observe();
 			nextFrame(() => {
 				region.pane.dispatchEvent(new Event("scroll"));
 				window.dispatchEvent(new Event("scroll"));
 			});
-			return isDecided();
+			return true;
 		}
-		function wait(startedAt = performance.now()) {
+		function wait() {
 			window.clearTimeout(findTimer);
-			if (adopt() || isDecided()) return;
-			if (disposed || !region.pane.isConnected) return;
-			if (videoId !== urlVideoId()) {
-				findTimer = window.setTimeout(() => wait(), COMMENTS_CHECK_MS);
-				return;
-			}
-			if (paused) {
-				check();
-				if (isDecided()) return;
-			}
-			const elapsed = performance.now() - startedAt;
-			if (elapsed >= LIVE_COMMENTS_GRACE_MS && commentsOffCandidate(region.node, watch) === "live-look") {
-				settle("off");
-				return;
-			}
-			if (elapsed >= COMMENTS_WAIT_MS) {
-				emit(FAILED);
-				return;
-			}
-			findTimer = window.setTimeout(() => wait(startedAt), COMMENTS_CHECK_MS);
+			if (adopt()) return;
+			findTimer = window.setTimeout(wait, COMMENTS_CHECK_MS);
 		}
 		return {
-			get state() {
-				return state;
-			},
 			start() {
 				wait();
 			},
-			retry() {
-				if (disposed || state !== "failed") return;
-				emit(LOADING);
-				if (region.node) {
-					const pane = region.pane;
-					pane.scrollTop = Math.max(0, pane.scrollHeight - pane.clientHeight - 1);
-					pane.dispatchEvent(new Event("scroll"));
-					nextFrame(() => {
-						pane.scrollTop = 0;
-					});
-				}
-				window.dispatchEvent(new Event("scroll"));
-				wait();
-			},
 			refresh() {
-				if (disposed) return;
-				const away = videoId !== urlVideoId();
-				if (region.replaced(watch)) {
-					if (away) adoptWhileAway();
-					else reload();
-					return;
-				}
-				if (away || !paused) return;
-				if (!region.node) reload();
-				else if (replacedAway) {
-					paused = false;
-					replacedAway = false;
-					stopWatching();
-					emit(LOADING);
-					observe();
-					wait();
-				} else {
-					paused = false;
-					check();
-				}
+				if (disposed || !region.replaced(watch)) return;
+				region.forget();
+				wait();
 			},
 			dispose() {
 				disposed = true;
-				observer?.disconnect();
-				observer = null;
 				window.clearTimeout(findTimer);
-				window.clearTimeout(checkTimer);
-				checkTimer = 0;
 				frames.forEach((frame) => cancelAnimationFrame(frame));
 				frames.clear();
 			}
@@ -986,8 +835,6 @@
       --${SCRIPT_ID}-outline: var(--yt-sys-color-baseline--outline, var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1)));
       --${SCRIPT_ID}-hover: var(--yt-sys-color-baseline--additive-background, var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .05)));
       --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1)));
-      --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #0f0f0f);
-      --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #fff));
     }
 
     #${SCRIPT_ID}-root {
@@ -1010,8 +857,6 @@
       --${SCRIPT_ID}-outline: var(--yt-sys-color-baseline--outline, var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .2)));
       --${SCRIPT_ID}-hover: var(--yt-sys-color-baseline--additive-background, var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .1)));
       --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(255, 255, 255, .2)));
-      --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #f1f1f1);
-      --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #0f0f0f));
     }
 
     ${HELD_STYLES}
@@ -1178,53 +1023,6 @@
       padding: 8px 0 24px !important;
     }
 
-    .${SCRIPT_ID}-status {
-      box-sizing: border-box;
-      display: grid;
-      min-height: 140px;
-      place-content: center;
-      gap: 12px;
-      padding: 24px;
-      color: var(--${SCRIPT_ID}-text-secondary);
-      font: 400 14px/20px Roboto, Arial, sans-serif;
-      text-align: center;
-    }
-
-    .${SCRIPT_ID}-retry {
-      justify-self: center;
-      height: 36px;
-      padding: 0 16px;
-      color: var(--${SCRIPT_ID}-text);
-      font: 500 14px/36px Roboto, Arial, sans-serif;
-      cursor: pointer;
-      background: var(--${SCRIPT_ID}-selected);
-      border: 0;
-      border-radius: 18px;
-    }
-
-    #${SCRIPT_ID}-toast {
-      position: absolute;
-      z-index: 5;
-      right: calc(12px + var(--${SCRIPT_ID}-content-inset, 0px));
-      bottom: 12px;
-      left: 12px;
-      box-sizing: border-box;
-      padding: 12px 14px;
-      color: var(--${SCRIPT_ID}-toast-text);
-      font: 400 13px/18px Roboto, Arial, sans-serif;
-      pointer-events: none;
-      background: var(--${SCRIPT_ID}-toast-bg);
-      border-radius: 8px;
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity .18s ease, transform .18s ease;
-    }
-
-    #${SCRIPT_ID}-toast[data-visible='true'] {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
     ${NOT_TWO_COLUMN_SELECTORS.map((selector) => `${selector} ${ROOT_SELECTOR}`).join(",\n    ")} {
       display: none !important;
     }
@@ -1242,9 +1040,7 @@
 		relatedPane: null,
 		commentsRegion: null,
 		relatedRegion: null,
-		commentsLoader: null,
-		unavailableTimer: 0,
-		switchDeferred: false,
+		commentsFollower: null,
 		activeTab: "comments",
 		scrollTop: {
 			comments: 0,
@@ -1257,8 +1053,6 @@
 		panelSelectionVideoId: null,
 		evaluationTimer: 0,
 		lastPaneScrollAt: 0,
-		statusShown: false,
-		retryTimer: 0,
 		specialObserver: null,
 		appObserver: null,
 		observerTarget: null
@@ -1267,19 +1061,11 @@
 		return (document.documentElement.lang || navigator.language || "").toLowerCase().startsWith("ko") ? {
 			comments: "댓글",
 			related: "관련 동영상",
-			loading: "댓글을 불러오는 중…",
-			loadFailed: "댓글을 불러오지 못했습니다.",
-			retry: "다시 시도",
-			unavailable: "이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다.",
 			chat: "채팅",
 			panel: "패널"
 		} : {
 			comments: "Comments",
 			related: "Related videos",
-			loading: "Loading comments…",
-			loadFailed: "Comments could not be loaded.",
-			retry: "Retry",
-			unavailable: "Comments are unavailable for this video. Showing related videos.",
 			chat: "Chat",
 			panel: "Panel"
 		};
@@ -1334,31 +1120,6 @@
 			}
 		};
 	}
-	function statusElement(kind) {
-		const text = labels();
-		const box = document.createElement("div");
-		box.className = `${SCRIPT_ID}-status`;
-		box.dataset.kind = kind;
-		const message = document.createElement("div");
-		message.textContent = kind === "error" ? text.loadFailed : text.loading;
-		box.appendChild(message);
-		if (kind === "error") {
-			const retry = document.createElement("button");
-			retry.type = "button";
-			retry.className = `${SCRIPT_ID}-retry`;
-			retry.textContent = text.retry;
-			retry.addEventListener("click", retryComments);
-			box.appendChild(retry);
-		}
-		return box;
-	}
-	function setCommentsStatus(kind) {
-		if (!state.commentsPane) return;
-		if (!kind && !state.statusShown) return;
-		state.commentsPane.querySelectorAll(`:scope > .${SCRIPT_ID}-status`).forEach((node) => node.remove());
-		state.statusShown = Boolean(kind);
-		if (kind) state.commentsPane.prepend(statusElement(kind));
-	}
 	function buildRoot() {
 		const text = labels();
 		const root = document.createElement("section");
@@ -1396,16 +1157,11 @@
 		relatedPane.setAttribute("role", "tabpanel");
 		relatedPane.setAttribute("aria-labelledby", `${SCRIPT_ID}-related-tab`);
 		relatedPane.addEventListener("scroll", recordPaneScroll, { passive: true });
-		const toast = document.createElement("div");
-		toast.id = `${SCRIPT_ID}-toast`;
-		toast.setAttribute("role", "status");
-		toast.setAttribute("aria-live", "polite");
-		body.append(commentsPane, relatedPane, toast);
+		body.append(commentsPane, relatedPane);
 		root.append(tabs, body);
 		state.root = root;
 		state.commentsPane = commentsPane;
 		state.relatedPane = relatedPane;
-		setCommentsStatus("loading");
 		return root;
 	}
 	function refreshLabels() {
@@ -1469,43 +1225,6 @@
 			syncScrollbarInsets();
 		});
 	}
-	function showToast(message) {
-		const toast = state.root?.querySelector(`#${SCRIPT_ID}-toast`);
-		if (!toast) return;
-		clearTimeout(state.retryTimer);
-		toast.textContent = message;
-		toast.dataset.visible = "true";
-		state.retryTimer = window.setTimeout(() => {
-			toast.dataset.visible = "false";
-		}, 4500);
-	}
-	function showCommentsUnavailable() {
-		setCommentsStatus(null);
-		showToast(labels().unavailable);
-		state.unavailableTimer = window.setTimeout(switchToRelatedIfOff, 900);
-	}
-	function switchToRelatedIfOff() {
-		state.switchDeferred = false;
-		if (state.commentsLoader?.state !== "off") return;
-		if (state.videoId !== urlVideoId()) {
-			state.switchDeferred = true;
-			return;
-		}
-		switchTab("related");
-	}
-	function reactToComments(commentsState) {
-		clearTimeout(state.unavailableTimer);
-		state.switchDeferred = false;
-		if (commentsState === "loading") setCommentsStatus("loading");
-		else if (commentsState === "failed") setCommentsStatus("error");
-		else if (commentsState === "loaded") setCommentsStatus(null);
-		else if (commentsState === "off") showCommentsUnavailable();
-	}
-	function retryComments() {
-		if (!state.root) return;
-		switchTab("comments");
-		state.commentsLoader.retry();
-	}
 	function observeSpecialPanels() {
 		state.specialObserver?.disconnect();
 		const inner = findSecondaryInner(state.watch);
@@ -1559,27 +1278,22 @@
 		const root = buildRoot();
 		state.relatedRegion = createRelatedRegion(state.relatedPane, root);
 		state.commentsRegion = createCommentsRegion(state.commentsPane, root);
-		state.commentsLoader = createCommentsLoader({
+		state.commentsFollower = createCommentsFollower({
 			region: state.commentsRegion,
-			watch,
-			videoId: state.videoId,
-			onChange: reactToComments
+			watch
 		});
 		state.relatedRegion.take(watch, (related) => related.before(root));
 		document.documentElement.classList.add(ACTIVE_CLASS);
 		applyHeld(false);
 		switchTab(initialTab, { reset: true });
 		observeSpecialPanels();
-		state.commentsLoader.start();
+		state.commentsFollower.start();
 		return true;
 	}
 	function teardown() {
-		clearTimeout(state.unavailableTimer);
-		state.switchDeferred = false;
-		clearTimeout(state.retryTimer);
 		state.specialObserver?.disconnect();
 		state.specialObserver = null;
-		state.commentsLoader?.dispose();
+		state.commentsFollower?.dispose();
 		youtubePanels.release();
 		const comments = state.commentsRegion;
 		const related = state.relatedRegion;
@@ -1597,7 +1311,7 @@
 		state.relatedPane = null;
 		state.commentsRegion = null;
 		state.relatedRegion = null;
-		state.commentsLoader = null;
+		state.commentsFollower = null;
 		state.videoId = null;
 		state.watch = null;
 	}
@@ -1652,8 +1366,7 @@
 		refreshLabels();
 		advanceLifecycle();
 		if (state.root) {
-			if (state.switchDeferred) switchToRelatedIfOff();
-			state.commentsLoader.refresh();
+			state.commentsFollower.refresh();
 			syncReplacedRelated();
 			syncScrollbarInsets();
 		}
@@ -1746,8 +1459,9 @@
 		scheduleEvaluation(0);
 		return () => {
 			controller.abort();
+			clearTimeout(state.evaluationTimer);
 			state.appObserver?.disconnect();
-			state.commentsLoader?.dispose();
+			state.commentsFollower?.dispose();
 			state.specialObserver?.disconnect();
 			youtubePanels.release();
 		};

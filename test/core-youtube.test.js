@@ -1,15 +1,11 @@
 import { expect, test, vi } from 'vitest';
 import {
   CHAT_PANEL,
-  COMMENTS_OFF_BY_UPLOADER,
-  COMMENTS_OFF_LIVE_LOOK,
   NOT_TWO_COLUMN_SELECTORS,
   SCREEN_ATTRIBUTES,
   TWO_COLUMN_SELECTOR,
   YOUTUBE_PANEL_ATTRIBUTES,
   availableQualities,
-  commentsHaveLoaded,
-  commentsOffCandidate,
   currentVideoId,
   findNativeComments,
   findApp,
@@ -277,43 +273,6 @@ test('the related list is only a direct child of the secondary column', () => {
   watch.querySelector('#secondary-inner').append(nested);
   expect(findNativeRelated(watch)).toBe(null);
   expect(findNativeRelated(null)).toBe(null);
-});
-
-test('comments count as loaded once a header, thread, message or count shows', () => {
-  expect(commentsHaveLoaded(null)).toBe(false);
-  for (const [html, expected] of [
-    ['', false],
-    ['<div></div>', false],
-    ['<ytd-comments-header-renderer></ytd-comments-header-renderer>', true],
-    ['<ytd-comment-thread-renderer></ytd-comment-thread-renderer>', true],
-    ['<ytd-message-renderer></ytd-message-renderer>', true],
-    ['<div id="header"><span id="count"></span></div>', true],
-  ]) {
-    const { node } = commentsPage(html);
-    expect(commentsHaveLoaded(node), html).toBe(expected);
-  }
-});
-
-test('a comments off candidate is the uploader turning them off, a live broadcast look, or neither', () => {
-  const chat = '<ytd-live-chat-frame></ytd-live-chat-frame>';
-  const cases = [
-    ['a message with no header or thread is the uploader turning comments off, in any language', '<ytd-message-renderer>コメントはオフです</ytd-message-renderer>', '', '', COMMENTS_OFF_BY_UPLOADER],
-    ['a #message element counts like a message renderer', '<div id="message">off</div>', '', '', COMMENTS_OFF_BY_UPLOADER],
-    ['a message beside a header is not off', '<ytd-message-renderer>x</ytd-message-renderer><ytd-comments-header-renderer></ytd-comments-header-renderer>', '', '', null],
-    ['a message beside only a thread is not off', '<ytd-message-renderer>x</ytd-message-renderer><ytd-comment-thread-renderer></ytd-comment-thread-renderer>', '', '', null],
-    ['empty hidden comments beside the live chat look like a live broadcast with comments off', '', ' hidden', chat, COMMENTS_OFF_LIVE_LOOK],
-    ['empty hidden comments without a live chat are not off', '', ' hidden', '', null],
-    ['empty visible comments beside the live chat are not off', '', '', chat, null],
-    ['hidden comments with content beside the live chat are not off', '<div></div>', ' hidden', chat, null],
-    ['loaded comments are not off', '<ytd-comments-header-renderer></ytd-comments-header-renderer>', '', '', null],
-  ];
-  for (const [name, html, attributes, inner, expected] of cases) {
-    const { watch, node } = commentsPage(html, attributes, `<div id="related"></div>${inner}`);
-    expect(commentsOffCandidate(node, watch), name).toBe(expected);
-  }
-  expect(commentsOffCandidate(null, null)).toBe(null);
-  const { node } = commentsPage('', ' hidden');
-  expect(commentsOffCandidate(node, null)).toBe(null);
 });
 
 function watchPage(attributes = '', url = 'https://www.youtube.com/watch?v=A') {

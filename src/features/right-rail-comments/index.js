@@ -1,5 +1,5 @@
 import { createCommentsRegion, createRelatedRegion } from './borrowed-region.js';
-import { FAILED, LOADED, LOADING, OFF, createCommentsLoader } from './comments-loader.js';
+import { createCommentsFollower } from './comments-follower.js';
 import { SCRIPT_ID } from './constants.js';
 import { ACTIVE_CLASS, HELD, HELD_CLASS, RELEASED, initialLifecycle, mountFailed, step } from './lifecycle.js';
 import { addStyles } from './styles.js';
@@ -41,9 +41,7 @@ const state = {
   relatedPane: null,
   commentsRegion: null,
   relatedRegion: null,
-  commentsLoader: null,
-  unavailableTimer: 0,
-  switchDeferred: false,
+  commentsFollower: null,
   activeTab: 'comments',
   scrollTop: { comments: 0, related: 0 },
   lifecycle: initialLifecycle,
@@ -53,8 +51,6 @@ const state = {
   panelSelectionVideoId: null,
   evaluationTimer: 0,
   lastPaneScrollAt: 0,
-  statusShown: false,
-  retryTimer: 0,
   specialObserver: null,
   appObserver: null,
   observerTarget: null,
@@ -66,20 +62,12 @@ const labels = () => {
     ? {
         comments: '댓글',
         related: '관련 동영상',
-        loading: '댓글을 불러오는 중…',
-        loadFailed: '댓글을 불러오지 못했습니다.',
-        retry: '다시 시도',
-        unavailable: '이 영상에서는 댓글을 사용할 수 없어 관련 동영상을 표시합니다.',
         chat: '채팅',
         panel: '패널',
       }
     : {
         comments: 'Comments',
         related: 'Related videos',
-        loading: 'Loading comments…',
-        loadFailed: 'Comments could not be loaded.',
-        retry: 'Retry',
-        unavailable: 'Comments are unavailable for this video. Showing related videos.',
         chat: 'Chat',
         panel: 'Panel',
       };
@@ -144,35 +132,6 @@ function observe(measurePanel) {
   };
 }
 
-function statusElement(kind) {
-  const text = labels();
-  const box = document.createElement('div');
-  box.className = `${SCRIPT_ID}-status`;
-  box.dataset.kind = kind;
-
-  const message = document.createElement('div');
-  message.textContent = kind === 'error' ? text.loadFailed : text.loading;
-  box.appendChild(message);
-
-  if (kind === 'error') {
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.className = `${SCRIPT_ID}-retry`;
-    retry.textContent = text.retry;
-    retry.addEventListener('click', retryComments);
-    box.appendChild(retry);
-  }
-  return box;
-}
-
-function setCommentsStatus(kind) {
-  if (!state.commentsPane) return;
-  if (!kind && !state.statusShown) return;
-  state.commentsPane.querySelectorAll(`:scope > .${SCRIPT_ID}-status`).forEach((node) => node.remove());
-  state.statusShown = Boolean(kind);
-  if (kind) state.commentsPane.prepend(statusElement(kind));
-}
-
 function buildRoot() {
   const text = labels();
   const root = document.createElement('section');
@@ -217,18 +176,12 @@ function buildRoot() {
   relatedPane.setAttribute('aria-labelledby', `${SCRIPT_ID}-related-tab`);
   relatedPane.addEventListener('scroll', recordPaneScroll, { passive: true });
 
-  const toast = document.createElement('div');
-  toast.id = `${SCRIPT_ID}-toast`;
-  toast.setAttribute('role', 'status');
-  toast.setAttribute('aria-live', 'polite');
-
-  body.append(commentsPane, relatedPane, toast);
+  body.append(commentsPane, relatedPane);
   root.append(tabs, body);
 
   state.root = root;
   state.commentsPane = commentsPane;
   state.relatedPane = relatedPane;
-  setCommentsStatus('loading');
   return root;
 }
 
@@ -304,48 +257,6 @@ function switchTab(tabName, options = {}) {
   });
 }
 
-function showToast(message) {
-  const toast = state.root?.querySelector(`#${SCRIPT_ID}-toast`);
-  if (!toast) return;
-  clearTimeout(state.retryTimer);
-  toast.textContent = message;
-  toast.dataset.visible = 'true';
-  state.retryTimer = window.setTimeout(() => {
-    toast.dataset.visible = 'false';
-  }, 4_500);
-}
-
-function showCommentsUnavailable() {
-  setCommentsStatus(null);
-  showToast(labels().unavailable);
-  state.unavailableTimer = window.setTimeout(switchToRelatedIfOff, 900);
-}
-
-function switchToRelatedIfOff() {
-  state.switchDeferred = false;
-  if (state.commentsLoader?.state !== OFF) return;
-  if (state.videoId !== urlVideoId()) {
-    state.switchDeferred = true;
-    return;
-  }
-  switchTab('related');
-}
-
-function reactToComments(commentsState) {
-  clearTimeout(state.unavailableTimer);
-  state.switchDeferred = false;
-  if (commentsState === LOADING) setCommentsStatus('loading');
-  else if (commentsState === FAILED) setCommentsStatus('error');
-  else if (commentsState === LOADED) setCommentsStatus(null);
-  else if (commentsState === OFF) showCommentsUnavailable();
-}
-
-function retryComments() {
-  if (!state.root) return;
-  switchTab('comments');
-  state.commentsLoader.retry();
-}
-
 function observeSpecialPanels() {
   state.specialObserver?.disconnect();
   const inner = findSecondaryInner(state.watch);
@@ -408,29 +319,21 @@ function mount(watch, initialTab) {
   const root = buildRoot();
   state.relatedRegion = createRelatedRegion(state.relatedPane, root);
   state.commentsRegion = createCommentsRegion(state.commentsPane, root);
-  state.commentsLoader = createCommentsLoader({
-    region: state.commentsRegion,
-    watch,
-    videoId: state.videoId,
-    onChange: reactToComments,
-  });
+  state.commentsFollower = createCommentsFollower({ region: state.commentsRegion, watch });
   state.relatedRegion.take(watch, (related) => related.before(root));
 
   document.documentElement.classList.add(ACTIVE_CLASS);
   applyHeld(false);
   switchTab(initialTab, { reset: true });
   observeSpecialPanels();
-  state.commentsLoader.start();
+  state.commentsFollower.start();
   return true;
 }
 
 function teardown() {
-  clearTimeout(state.unavailableTimer);
-  state.switchDeferred = false;
-  clearTimeout(state.retryTimer);
   state.specialObserver?.disconnect();
   state.specialObserver = null;
-  state.commentsLoader?.dispose();
+  state.commentsFollower?.dispose();
   youtubePanels.release();
 
   const comments = state.commentsRegion;
@@ -448,7 +351,7 @@ function teardown() {
   state.relatedPane = null;
   state.commentsRegion = null;
   state.relatedRegion = null;
-  state.commentsLoader = null;
+  state.commentsFollower = null;
   state.videoId = null;
   state.watch = null;
 }
@@ -501,8 +404,7 @@ function evaluate() {
   refreshLabels();
   advanceLifecycle();
   if (state.root) {
-    if (state.switchDeferred) switchToRelatedIfOff();
-    state.commentsLoader.refresh();
+    state.commentsFollower.refresh();
     syncReplacedRelated();
     syncScrollbarInsets();
   }
@@ -600,8 +502,9 @@ function boot() {
   scheduleEvaluation(0);
   return () => {
     controller.abort();
+    clearTimeout(state.evaluationTimer);
     state.appObserver?.disconnect();
-    state.commentsLoader?.dispose();
+    state.commentsFollower?.dispose();
     state.specialObserver?.disconnect();
     youtubePanels.release();
   };

@@ -7,3 +7,4 @@ ADR 0003의 YouTube 어댑터(`src/core/youtube.js`)를 넓힌다. 댓글 패널
 ## Consequences
 
 - 2열 화면 판정과 YouTube 패널 판정도 같은 성격이라 어댑터로 옮겼다(ADR 0005). 이제 댓글 패널에 남은 YouTube 화면 해석은 없다.
+- 0.8.5에서 댓글 꺼짐·로딩 판정과 기다림 정책(3초·20초 대기, 실패 안내, 자동 전환)을 없애, 어댑터의 판정(`commentsOffCandidate`, `commentsHaveLoaded`)과 로더의 상태 머신을 함께 지웠다. 댓글 패널은 댓글 자리를 가져오고 YouTube가 갈아 끼우면 따라가는 일만 한다.

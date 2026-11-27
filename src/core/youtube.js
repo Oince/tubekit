@@ -19,7 +19,6 @@ export const PANEL_CONTAINER_SELECTORS = ['#panels', '#chat-container'];
 export const RELATED_SELECTORS = ['#related', 'ytd-watch-next-secondary-results-renderer#related'];
 export const COMMENTS_SELECTOR = 'ytd-comments#comments';
 const COMMENTS_HOME_SELECTOR = `${PRIMARY_SELECTOR} #below`;
-const COMMENTS_LOADED_SELECTOR = 'ytd-comments-header-renderer, ytd-comment-thread-renderer, ytd-message-renderer, #header #count';
 
 const PAGE_VIDEO_ID_ATTRIBUTE = 'video-id';
 const FULLSCREEN_ATTRIBUTE = 'fullscreen';
@@ -374,9 +373,6 @@ export function requestLayout() {
   window.dispatchEvent(new Event('resize'));
 }
 
-export const COMMENTS_OFF_BY_UPLOADER = 'uploader';
-export const COMMENTS_OFF_LIVE_LOOK = 'live-look';
-
 export function findNativeComments(watch, ignoreInside = null) {
   if (!watch) return null;
   const candidates = [...watch.querySelectorAll(COMMENTS_SELECTOR)];
@@ -387,20 +383,4 @@ export function findNativeRelated(watch) {
   const secondaryInner = findSecondaryInner(watch);
   if (!secondaryInner) return null;
   return [...secondaryInner.children].find(child => child.matches(RELATED_SELECTORS.join(', '))) || null;
-}
-
-export function commentsHaveLoaded(node) {
-  if (!node) return false;
-  return Boolean(node.querySelector(COMMENTS_LOADED_SELECTOR));
-}
-
-export function commentsOffCandidate(node, watch) {
-  if (!node) return null;
-  if (node.querySelector('ytd-message-renderer, #message') && !node.querySelector('ytd-comments-header-renderer, ytd-comment-thread-renderer')) {
-    return COMMENTS_OFF_BY_UPLOADER;
-  }
-  if (node.hasAttribute('hidden') && !node.firstElementChild && watch?.querySelector(`${SECONDARY_INNER_SELECTOR} ${CHAT_FRAME_SELECTOR}`)) {
-    return COMMENTS_OFF_LIVE_LOOK;
-  }
-  return null;
 }

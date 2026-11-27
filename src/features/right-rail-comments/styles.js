@@ -61,8 +61,6 @@ export function addStyles() {
       --${SCRIPT_ID}-outline: var(--yt-sys-color-baseline--outline, var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1)));
       --${SCRIPT_ID}-hover: var(--yt-sys-color-baseline--additive-background, var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .05)));
       --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .1)));
-      --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #0f0f0f);
-      --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #fff));
     }
 
     #${SCRIPT_ID}-root {
@@ -85,8 +83,6 @@ export function addStyles() {
       --${SCRIPT_ID}-outline: var(--yt-sys-color-baseline--outline, var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .2)));
       --${SCRIPT_ID}-hover: var(--yt-sys-color-baseline--additive-background, var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .1)));
       --${SCRIPT_ID}-selected: var(--yt-sys-color-baseline--button-chip-background-hover, var(--yt-spec-badge-chip-background, rgba(255, 255, 255, .2)));
-      --${SCRIPT_ID}-toast-bg: var(--yt-sys-color-baseline--inverted-background, #f1f1f1);
-      --${SCRIPT_ID}-toast-text: var(--yt-sys-color-baseline--text-primary-inverse, var(--yt-spec-text-primary-inverse, #0f0f0f));
     }
 
     ${HELD_STYLES}
@@ -251,53 +247,6 @@ export function addStyles() {
       max-width: none !important;
       margin: 0 !important;
       padding: 8px 0 24px !important;
-    }
-
-    .${SCRIPT_ID}-status {
-      box-sizing: border-box;
-      display: grid;
-      min-height: 140px;
-      place-content: center;
-      gap: 12px;
-      padding: 24px;
-      color: var(--${SCRIPT_ID}-text-secondary);
-      font: 400 14px/20px Roboto, Arial, sans-serif;
-      text-align: center;
-    }
-
-    .${SCRIPT_ID}-retry {
-      justify-self: center;
-      height: 36px;
-      padding: 0 16px;
-      color: var(--${SCRIPT_ID}-text);
-      font: 500 14px/36px Roboto, Arial, sans-serif;
-      cursor: pointer;
-      background: var(--${SCRIPT_ID}-selected);
-      border: 0;
-      border-radius: 18px;
-    }
-
-    #${SCRIPT_ID}-toast {
-      position: absolute;
-      z-index: 5;
-      right: calc(12px + var(--${SCRIPT_ID}-content-inset, 0px));
-      bottom: 12px;
-      left: 12px;
-      box-sizing: border-box;
-      padding: 12px 14px;
-      color: var(--${SCRIPT_ID}-toast-text);
-      font: 400 13px/18px Roboto, Arial, sans-serif;
-      pointer-events: none;
-      background: var(--${SCRIPT_ID}-toast-bg);
-      border-radius: 8px;
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity .18s ease, transform .18s ease;
-    }
-
-    #${SCRIPT_ID}-toast[data-visible='true'] {
-      opacity: 1;
-      transform: translateY(0);
     }
 
     ${NOT_TWO_COLUMN_SELECTORS.map(selector => `${selector} ${ROOT_SELECTOR}`).join(',\n    ')} {
